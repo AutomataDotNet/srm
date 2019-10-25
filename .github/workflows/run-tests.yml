@@ -10,7 +10,7 @@ jobs:
     steps:
     - uses: actions/checkout@v1
     - name: Setup .NET Core
-      uses: actions/setup-dotnet
+      uses: actions/setup-dotnet@master
       with:
         dotnet-version: 3.0
     - name: Test Release configuration
