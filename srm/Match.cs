@@ -18,6 +18,6 @@ namespace Microsoft.Automata
 
         public override bool Equals(object obj) => obj is Match other && this == other;
 
-        public override int GetHashCode() => System.HashCode.Combine(Index, Length);
+        public override int GetHashCode() => (Index, Length).GetHashCode();
     }
 }
