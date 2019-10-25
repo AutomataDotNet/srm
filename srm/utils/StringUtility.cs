@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     /// <summary>
     /// Provides some character escaping routines for strings.

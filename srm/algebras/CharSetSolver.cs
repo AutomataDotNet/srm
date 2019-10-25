@@ -4,10 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 
-using Microsoft.Automata;
-using Microsoft.Automata.Utilities;
-
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     /// <summary>
     /// Provides functionality to build character sets, to perform boolean operations over character sets,

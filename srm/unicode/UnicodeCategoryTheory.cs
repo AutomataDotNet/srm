@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Microsoft.Automata.Generated;
+using Microsoft.SRM.Generated;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     /// <summary>
     /// Maps unicode categories to correspoing character predicates.

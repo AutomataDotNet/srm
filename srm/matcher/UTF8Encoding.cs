@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
 
-namespace Microsoft.Automata.Utilities
+namespace Microsoft.SRM
 {
     /// <summary>
     /// Methods for decoding UTF8 encoded strings.

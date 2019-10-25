@@ -1,4 +1,4 @@
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     public struct Match
     {

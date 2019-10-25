@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.Serialization;
 using System.Text;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     /// <summary>
     /// Represents a sorted finite set of finite intervals representing characters

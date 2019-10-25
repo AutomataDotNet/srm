@@ -4,7 +4,7 @@ using System.Text;
 using System.Globalization;
 using System.IO;
 
-namespace Microsoft.Automata.Utilities
+namespace Microsoft.SRM
 {
     public static class IgnoreCaseRelationGenerator
     {

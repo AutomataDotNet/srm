@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     internal class RangeConverter
     {

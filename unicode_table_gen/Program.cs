@@ -4,14 +4,14 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     class Program
     {
         static void Main(string[] args)
         {
-            Utilities.UnicodeCategoryRangesGenerator.Generate("Microsoft.Automata.Generated", "UnicodeCategoryRanges", "");
-            Utilities.IgnoreCaseRelationGenerator.Generate("Microsoft.Automata.Generated", "IgnoreCaseRelation", "");
+            UnicodeCategoryRangesGenerator.Generate("Microsoft.SRM.Generated", "UnicodeCategoryRanges", "");
+            IgnoreCaseRelationGenerator.Generate("Microsoft.SRM.Generated", "IgnoreCaseRelation", "");
         }
     }
 }

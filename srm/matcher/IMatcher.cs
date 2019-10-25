@@ -7,7 +7,7 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using System.IO;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     /// <summary>
     /// Provides IsMatch and Matches methods.

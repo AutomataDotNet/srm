@@ -5,7 +5,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     /// <summary>
     /// Kinds of symbolic regexes

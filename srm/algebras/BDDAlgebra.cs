@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using BvSetPair = System.Tuple<Microsoft.Automata.BDD, Microsoft.Automata.BDD>;
-using BvSet_Int = System.Tuple<Microsoft.Automata.BDD, int>;
-using BvSetKey = System.Tuple<int, Microsoft.Automata.BDD, Microsoft.Automata.BDD>;
+using BvSetPair = System.Tuple<Microsoft.SRM.BDD, Microsoft.SRM.BDD>;
+using BvSet_Int = System.Tuple<Microsoft.SRM.BDD, int>;
+using BvSetKey = System.Tuple<int, Microsoft.SRM.BDD, Microsoft.SRM.BDD>;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
 
     /// <summary>

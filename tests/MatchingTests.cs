@@ -1,20 +1,9 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
-using System.IO;
-
-using Microsoft.Automata;
-using Microsoft.Automata.Generated;
-using Microsoft.Automata.Utilities;
-
-using System.Reflection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-
 using System.Security.Cryptography;
-using System.Runtime.Serialization.Formatters.Binary;
 using System.Linq;
 
-namespace Automata.Tests
+namespace Microsoft.SRM.Tests
 {
     [TestClass]
     public class SymbolicRegexTests
