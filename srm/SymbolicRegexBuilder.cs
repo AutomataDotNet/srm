@@ -22,8 +22,6 @@ namespace Microsoft.Automata
         internal SymbolicRegexNode<S> newLine;
         internal SymbolicRegexNode<S> dot;
         internal SymbolicRegexNode<S> dotStar;
-        internal SymbolicRegexNode<S> dollar;
-        internal SymbolicRegexNode<S> hat;
         internal SymbolicRegexNode<S> bolRegex;
         internal SymbolicRegexNode<S> eolRegex;
 
