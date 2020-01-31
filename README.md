@@ -20,7 +20,7 @@ var matches = regex.Matches(input); // list of Match structs for "ello" and "rld
 
 # Building and running tests
 
-The library is built and tested with [.NET Core 2.2](https://dotnet.microsoft.com/download/dotnet-core/2.2). To build the project and run the tests run:
+The library is built and tested with [.NET Core 3.1](https://dotnet.microsoft.com/download/dotnet-core/3.1). To build the project and run the tests run:
 
 ```
 dotnet build
