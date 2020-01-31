@@ -3,8 +3,9 @@
 jobs:
 
 - job: "Build"
-  displayName: "Windows 2017 build"
+  displayName: "Windows build"
   pool:
-    vmImage: "vs2017-win2016"
+    vmImage: "windows-latest"
   steps:
     - script: dotnet build
+    - script: dotnet test
