@@ -13,7 +13,7 @@ jobs:
 - job: Release 
   displayName: Create Release
   dependsOn: 
-  - Build
+  - WindowsBuild
   steps:
   - task: DownloadPipelineArtifact@0
     inputs:
