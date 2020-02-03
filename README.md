@@ -35,3 +35,9 @@ SRM uses unicode character tables recovered from the .NET runtime. To regenerate
 cd unicode_table_gen
 dotnet run ../srm/unicode
 ```
+
+# Build Status
+
+| Azure Pipelines | 
+| --------------- | 
+[![Build Status](https://z3build.visualstudio.com/Z3Build/_apis/build/status/NikolajBjorner.srm?branchName=master)](https://z3build.visualstudio.com/Z3Build/_build/latest?definitionId=16&branchName=master) 
