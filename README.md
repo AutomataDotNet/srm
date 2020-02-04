@@ -40,4 +40,4 @@ dotnet run ../srm/unicode
 
 | Azure Pipelines | 
 | --------------- | 
-[![Build Status](https://z3build.visualstudio.com/Z3Build/_apis/build/status/NikolajBjorner.srm?branchName=master)](https://z3build.visualstudio.com/Z3Build/_build/latest?definitionId=16&branchName=master) 
+[![Build Status](https://dev.azure.com/symbolicautomata/margus/_apis/build/status/AutomataDotNet.srm?branchName=master)](https://dev.azure.com/symbolicautomata/margus/_build/latest?definitionId=1&branchName=master)
