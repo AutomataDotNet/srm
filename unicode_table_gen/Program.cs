@@ -8,10 +8,17 @@ namespace Microsoft.SRM
 {
     class Program
     {
-        static void Main(string[] args)
+        static int Main(string[] args)
         {
-            UnicodeCategoryRangesGenerator.Generate("Microsoft.SRM.Generated", "UnicodeCategoryRanges", "");
-            IgnoreCaseRelationGenerator.Generate("Microsoft.SRM.Generated", "IgnoreCaseRelation", "");
+            if (args.Length != 1)
+            {
+                System.Console.WriteLine("usage: unicode_table_gen <target directory>");
+                return 1;
+            }
+            string targetDirectory = args[0];
+            Utilities.UnicodeCategoryRangesGenerator.Generate("Microsoft.SRM.Generated", "UnicodeCategoryRanges", targetDirectory);
+            Utilities.IgnoreCaseRelationGenerator.Generate("Microsoft.SRM.Generated", "IgnoreCaseRelation", targetDirectory);
+            return 0;
         }
     }
 }

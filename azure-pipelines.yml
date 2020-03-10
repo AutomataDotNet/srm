@@ -1,0 +1,12 @@
+
+
+jobs:
+
+- job: WindowsBuild
+  displayName: "Windows build"
+  pool:
+    vmImage: "windows-latest"
+  steps:
+    - script: dotnet build
+    - script: dotnet test
+
