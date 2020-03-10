@@ -16,8 +16,8 @@ namespace Microsoft.SRM
                 return 1;
             }
             string targetDirectory = args[0];
-            Utilities.UnicodeCategoryRangesGenerator.Generate("Microsoft.SRM.Generated", "UnicodeCategoryRanges", targetDirectory);
-            Utilities.IgnoreCaseRelationGenerator.Generate("Microsoft.SRM.Generated", "IgnoreCaseRelation", targetDirectory);
+            UnicodeCategoryRangesGenerator.Generate("Microsoft.SRM.Generated", "UnicodeCategoryRanges", targetDirectory);
+            IgnoreCaseRelationGenerator.Generate("Microsoft.SRM.Generated", "IgnoreCaseRelation", targetDirectory);
             return 0;
         }
     }
