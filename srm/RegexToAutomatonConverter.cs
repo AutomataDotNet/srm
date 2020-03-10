@@ -1,9 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using Microsoft.Automata;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     /// <summary>
     /// Provides functionality to convert .NET regex patterns to corresponding symbolic finite automata and symbolic regexes

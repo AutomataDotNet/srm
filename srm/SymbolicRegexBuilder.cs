@@ -2,7 +2,7 @@
 using System;
 using System.Runtime.Serialization;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     /// <summary>
     /// Builder of symbolic regexes over S. 

@@ -1,13 +1,12 @@
 ﻿using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using Microsoft.Automata;
 using System.Collections;
 using System.Collections.Generic;
 using System;
 using System.Linq.Expressions;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     public static class VectorizedIndexOf
     {

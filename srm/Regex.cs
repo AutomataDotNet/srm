@@ -4,7 +4,7 @@ using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     [Serializable]
     public class Regex

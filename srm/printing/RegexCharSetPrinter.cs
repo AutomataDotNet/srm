@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     internal static class RegexCharSetPrinter
     {

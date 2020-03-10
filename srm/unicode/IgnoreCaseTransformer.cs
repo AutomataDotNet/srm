@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Microsoft.Automata.Utilities
+namespace Microsoft.SRM
 {
     internal class IgnoreCaseTransformer
     {
@@ -15,7 +15,7 @@ namespace Microsoft.Automata.Utilities
         public IgnoreCaseTransformer(CharSetSolver charSetSolver)
         {
             this.solver = charSetSolver;
-            IgnoreCaseRel = charSetSolver.Deserialize(Microsoft.Automata.Generated.IgnoreCaseRelation.ignorecase);
+            IgnoreCaseRel = charSetSolver.Deserialize(Microsoft.SRM.Generated.IgnoreCaseRelation.ignorecase);
             domain = IgnoreCaseRel >> 16;
         }
 

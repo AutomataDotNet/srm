@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
     class Program
     {
@@ -16,8 +16,8 @@ namespace Microsoft.Automata
                 return 1;
             }
             string targetDirectory = args[0];
-            Utilities.UnicodeCategoryRangesGenerator.Generate("Microsoft.Automata.Generated", "UnicodeCategoryRanges", targetDirectory);
-            Utilities.IgnoreCaseRelationGenerator.Generate("Microsoft.Automata.Generated", "IgnoreCaseRelation", targetDirectory);
+            UnicodeCategoryRangesGenerator.Generate("Microsoft.SRM.Generated", "UnicodeCategoryRanges", targetDirectory);
+            IgnoreCaseRelationGenerator.Generate("Microsoft.SRM.Generated", "IgnoreCaseRelation", targetDirectory);
             return 0;
         }
     }

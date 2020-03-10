@@ -2,9 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-using Microsoft.Automata;
-
-namespace Microsoft.Automata
+namespace Microsoft.SRM
 {
 
     /// <summary>
