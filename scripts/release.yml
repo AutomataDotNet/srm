@@ -1,0 +1,42 @@
+trigger: none
+
+variables:
+  ReleaseVersion: '1.0.0'
+
+pool:
+  vmImage: "windows-latest"
+
+steps:
+- script: dotnet pack srm /p:PackageVersion=$(ReleaseVersion) --output $(Build.ArtifactStagingDirectory)
+  displayName: 'Pack'
+- task: EsrpCodeSigning@1
+  displayName: 'Sign'
+  inputs:
+    ConnectedServiceName: 'srm-esrp-signing'
+    FolderPath: $(Build.ArtifactStagingDirectory)
+    Pattern: Microsoft.SRM.$(ReleaseVersion).nupkg
+    signConfigType: 'inlineSignParams'
+    inlineOperation: |
+      [
+        {
+          "KeyCode" : "CP-401405",
+          "OperationCode" : "NuGetSign",
+          "Parameters" : {},
+          "ToolName" : "sign",
+          "ToolVersion" : "1.0"
+        },
+        {
+          "KeyCode" : "CP-401405",
+          "OperationCode" : "NuGetVerify",
+          "Parameters" : {},
+          "ToolName" : "sign",
+          "ToolVersion" : "1.0"
+        }
+      ]
+    SessionTimeout: '60'
+    MaxConcurrency: '50'
+    MaxRetryAttempts: '5'
+- task: PublishPipelineArtifact@1
+  inputs:
+    targetPath: $(Build.ArtifactStagingDirectory)\Microsoft.SRM.$(ReleaseVersion).nupkg
+    artifactName: 'NuGetPackage'
