@@ -2,9 +2,8 @@ pool:
   vmImage: "windows-latest"
 
 steps:
-- script: dotnet build
-  displayName: 'Build'
 - task: DotNetCoreCLI@2
   displayName: 'Test'
   inputs:
     command: test
+    arguments: '--collect "Code coverage"'
