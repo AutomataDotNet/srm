@@ -6,4 +6,3 @@ steps:
   displayName: 'Test'
   inputs:
     command: test
-    arguments: '--collect "Code coverage"'
