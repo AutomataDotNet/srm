@@ -1,3 +1,5 @@
+trigger: none
+
 variables:
   ReleaseVersion: '1.0.0'
 
