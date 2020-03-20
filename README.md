@@ -35,9 +35,3 @@ SRM uses unicode character tables recovered from the .NET runtime. To regenerate
 cd unicode_table_gen
 dotnet run ../srm/unicode
 ```
-
-# Build Status
-
-| Azure Pipelines | 
-| --------------- | 
-[![Build Status](https://dev.azure.com/symbolicautomata/SRMBUILD/_apis/build/status/AutomataDotNet.srm?branchName=master)](https://dev.azure.com/symbolicautomata/SRMBUILD/_build/latest?definitionId=1&branchName=master)
