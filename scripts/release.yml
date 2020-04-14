@@ -14,7 +14,7 @@ steps:
   inputs:
     ConnectedServiceName: 'srm-esrp-signing'
     FolderPath: $(Build.ArtifactStagingDirectory)
-    Pattern: Microsoft.SRM.$(ReleaseVersion).nupkg
+    Pattern: Microsoft.Automata.SRM.$(ReleaseVersion).nupkg
     signConfigType: 'inlineSignParams'
     inlineOperation: |
       [
@@ -38,5 +38,5 @@ steps:
     MaxRetryAttempts: '5'
 - task: PublishPipelineArtifact@1
   inputs:
-    targetPath: $(Build.ArtifactStagingDirectory)\Microsoft.SRM.$(ReleaseVersion).nupkg
+    targetPath: $(Build.ArtifactStagingDirectory)\Microsoft.Automata.SRM.$(ReleaseVersion).nupkg
     artifactName: 'NuGetPackage'
