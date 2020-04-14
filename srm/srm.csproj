@@ -7,7 +7,7 @@
     <Authors>Microsoft</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Copyright>© Microsoft Corporation. All rights reserved.</Copyright>
-    <ProjectUrl>https://github.com/AutomataDotNet/srm</ProjectUrl>
+    <PackageProjectUrl>https://github.com/AutomataDotNet/srm</PackageProjectUrl>
     <Description>High-performance .NET regex engine with predictable performance</Description>
     <PackageTags>regular expression regex matching unicode</PackageTags>
     <PackageIcon>icon.png</PackageIcon>
