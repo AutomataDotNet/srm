@@ -3,7 +3,14 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <PackageId>Microsoft.SRM</PackageId>
+    <PackageId>Microsoft.Automata.SRM</PackageId>
+    <Authors>Microsoft</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>© Microsoft Corporation. All rights reserved.</Copyright>
+    <ProjectUrl>https://github.com/AutomataDotNet/srm</ProjectUrl>
+    <Description>High-performance .NET regex engine with predictable performance</Description>
+    <PackageTags>regular expression regex matching unicode</PackageTags>
+    <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,5 +21,9 @@
 
   <ItemGroup>
     <ProjectCapability Include="CSharp;Managed;ClassDesigner" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="icon.png" Pack="true" PackagePath=""/>
   </ItemGroup>
 </Project>
