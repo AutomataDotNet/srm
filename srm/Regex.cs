@@ -94,7 +94,7 @@ namespace Microsoft.SRM
         /// <returns></returns>
         public static Regex Deserialize(string file, IFormatter formatter = null)
         {
-            Stream stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None);
+            Stream stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
             Regex matcher = Deserialize(stream, formatter);
             stream.Close();
             return matcher;
