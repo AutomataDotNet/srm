@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 
@@ -28,6 +29,7 @@ namespace Microsoft.SRM
     /// <summary>
     /// Represents an AST node of a symbolic regex.
     /// </summary>
+    [System.Diagnostics.DebuggerDisplay("{ToString()}")]
     public class SymbolicRegexNode<S>
     {
         internal SymbolicRegexBuilder<S> builder;
@@ -35,7 +37,7 @@ namespace Microsoft.SRM
         internal int lower = -1;
         internal int upper = -1;
         internal S set = default(S);
-        internal ImmutableList<S> sequence = null;
+        internal ImmutableList<SymbolicRegexNode<S>> sequence = null;
 
         internal SymbolicRegexNode<S> left = null;
         internal SymbolicRegexNode<S> right = null;
@@ -101,11 +103,16 @@ namespace Microsoft.SRM
                         }
                     case SymbolicRegexKind.Concat:
                         {
-                            var elems = node.ToArray();
-                            var elems_str = Array.ConvertAll(elems, x => x.Serialize());
-                            var str = string.Join(",", elems_str);
                             sb.Append("S(");
-                            sb.Append(str);
+                            bool first = true;
+                            foreach (var elem in node.sequence)
+                            {
+                                if (first)
+                                    first = false;
+                                else
+                                    sb.Append(',');
+                                sb.Append(elem.Serialize());
+                            }
                             sb.Append(")");
                             return;
                         }
@@ -157,36 +164,6 @@ namespace Microsoft.SRM
                 }
             }
         }
-
-        /// <summary>
-        /// Converts a concatenation into an array, 
-        /// returns a non-concatenation in a singleton array.
-        /// </summary>
-        public SymbolicRegexNode<S>[] ToArray()
-        {
-            var list = new List<SymbolicRegexNode<S>>();
-            AppendToList(this, list);
-            return list.ToArray();
-        }
-
-        /// <summary>
-        /// should only be used only if this is a concatenation node
-        /// </summary>
-        /// <returns></returns>
-        static void AppendToList(SymbolicRegexNode<S> concat, List<SymbolicRegexNode<S>> list)
-        {
-            var node = concat;
-            while (node.kind == SymbolicRegexKind.Concat)
-            {
-                if (node.left.kind == SymbolicRegexKind.Concat)
-                    AppendToList(node.left, list);
-                else
-                    list.Add(node.left);
-                node = node.right;
-            }
-            list.Add(node);
-        }
-
 
         #endregion
 
@@ -352,25 +329,6 @@ namespace Microsoft.SRM
         }
 
         /// <summary>
-        /// Returns the number of top-level concatenation nodes.
-        /// </summary>
-        int _ConcatCount = -1;
-        public int ConcatCount
-        {
-            get
-            {
-                if (_ConcatCount == -1)
-                {
-                    if (this.kind == SymbolicRegexKind.Concat)
-                        _ConcatCount = left.ConcatCount + right.ConcatCount + 1;
-                    else
-                        _ConcatCount = 0;
-                }
-                return _ConcatCount;
-            }
-        }
-
-        /// <summary>
         /// IfThenElse condition
         /// </summary>
         public SymbolicRegexNode<S> IteCond
@@ -442,12 +400,13 @@ namespace Microsoft.SRM
         /// <param name="iteCond">if-then-else condition</param>
         /// <param name="alts">alternatives set of a disjunction</param>
         /// <param name="seq">sequence of singleton sets</param>
-        private SymbolicRegexNode(SymbolicRegexBuilder<S> builder, SymbolicRegexKind kind, SymbolicRegexNode<S> left, SymbolicRegexNode<S> right, int lower, int upper, S set, SymbolicRegexNode<S> iteCond, SymbolicRegexSet<S> alts)
+        private SymbolicRegexNode(SymbolicRegexBuilder<S> builder, SymbolicRegexKind kind, SymbolicRegexNode<S> left, SymbolicRegexNode<S> right, ImmutableList<SymbolicRegexNode<S>> sequence, int lower, int upper, S set, SymbolicRegexNode<S> iteCond, SymbolicRegexSet<S> alts)
         {
             this.builder = builder;
             this.kind = kind;
             this.left = left;
             this.right = right;
+            this.sequence = sequence;
             this.lower = lower;
             this.upper = upper;
             this.set = set;
@@ -455,27 +414,21 @@ namespace Microsoft.SRM
             this.alts = alts;
         }
 
-        internal SymbolicRegexNode<S> ConcatWithoutNormalizing(SymbolicRegexNode<S> next)
-        {
-            var concat = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Concat, this, next, -1, -1, default(S), null, null);
-            return concat;
-        }
-
         #region called only once, in the constructor of SymbolicRegexBuilder
 
         internal static SymbolicRegexNode<S> MkFalse(SymbolicRegexBuilder<S> builder, S f)
         {
-            return new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Singleton, null, null, -1, -1, f, null, null);
+            return new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Singleton, null, null, null, -1, -1, f, null, null);
         }
 
         internal static SymbolicRegexNode<S> MkTrue(SymbolicRegexBuilder<S> builder, S t)
         {
-            return new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Singleton, null, null, -1, -1, t, null, null);
+            return new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Singleton, null, null, null, -1, -1, t, null, null);
         }
 
         internal static SymbolicRegexNode<S> MkNewline(SymbolicRegexBuilder<S> builder, S nl)
         {
-            return new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Singleton, null, null, -1, -1, nl, null, null);
+            return new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Singleton, null, null, null, -1, -1, nl, null, null);
         }
 
         //internal static SymbolicRegexNode<S> MkSequence(SymbolicRegexBuilder<S> builder, ImmutableList<S> seq)
@@ -485,49 +438,49 @@ namespace Microsoft.SRM
 
         internal static SymbolicRegexNode<S> MkWatchDog(SymbolicRegexBuilder<S> builder, int length)
         {
-            var wd = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.WatchDog, null, null, length, -1, default(S), null, null);
+            var wd = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.WatchDog, null, null, null, length, -1, default(S), null, null);
             wd.isNullable = true;
             return wd;
         }
 
         internal static SymbolicRegexNode<S> MkEpsilon(SymbolicRegexBuilder<S> builder)
         {
-            var eps = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Epsilon, null, null, -1, -1, default(S), null, null);
+            var eps = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Epsilon, null, null, null, -1, -1, default(S), null, null);
             eps.isNullable = true;
             return eps;
         }
 
         internal static SymbolicRegexNode<S> MkStartAnchor(SymbolicRegexBuilder<S> builder)
         {
-            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.StartAnchor, null, null, -1, -1, default(S), null, null);
+            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.StartAnchor, null, null, null, -1, -1, default(S), null, null);
             anchor.containsAnchors = true;
             return anchor;
         }
 
         internal static SymbolicRegexNode<S> MkEndAnchor(SymbolicRegexBuilder<S> builder)
         {
-            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.EndAnchor, null, null, -1, -1, default(S), null, null);
+            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.EndAnchor, null, null, null, -1, -1, default(S), null, null);
             anchor.containsAnchors = true;
             return anchor;
         }
 
         internal static SymbolicRegexNode<S> MkEolAnchor(SymbolicRegexBuilder<S> builder)
         {
-            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.EndAnchor, null, null, -1, -2, default(S), null, null);
+            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.EndAnchor, null, null, null, -1, -2, default(S), null, null);
             anchor.containsAnchors = true;
             return anchor;
         }
 
         internal static SymbolicRegexNode<S> MkBolAnchor(SymbolicRegexBuilder<S> builder)
         {
-            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.StartAnchor, null, null, -2, -1, default(S), null, null);
+            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.StartAnchor, null, null, null, -2, -1, default(S), null, null);
             anchor.containsAnchors = true;
             return anchor;
         }
 
         internal static SymbolicRegexNode<S> MkDotStar(SymbolicRegexBuilder<S> builder, SymbolicRegexNode<S> body)
         {
-            var loop = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Loop, body, null, 0, int.MaxValue, default(S), null, null);
+            var loop = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Loop, body, null, null, 0, int.MaxValue, default(S), null, null);
             loop.isNullable = true;
             return loop;
         }
@@ -536,7 +489,7 @@ namespace Microsoft.SRM
 
         internal static SymbolicRegexNode<S> MkSingleton(SymbolicRegexBuilder<S> builder, S set)
         {
-            return new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Singleton, null, null, -1, -1, set, null, null);
+            return new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Singleton, null, null, null, -1, -1, set, null, null);
         }
 
         internal static SymbolicRegexNode<S> MkLoop(SymbolicRegexBuilder<S> builder, SymbolicRegexNode<S> body, int lower, int upper, bool isLazy)
@@ -544,7 +497,7 @@ namespace Microsoft.SRM
             if (lower < 0 || upper < lower)
                 throw new AutomataException(AutomataExceptionKind.InvalidArgument);
 
-            var loop = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Loop, body, null, lower, upper, default(S), null, null);
+            var loop = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Loop, body, null, null, lower, upper, default(S), null, null);
             if (loop.lower == 0)
             {
                 loop.isNullable = true;
@@ -579,7 +532,7 @@ namespace Microsoft.SRM
                 return alts.GetTheElement();
             else
             {
-                var or = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Or, null, null, -1, -1, default(S), null, alts);
+                var or = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Or, null, null, null, -1, -1, default(S), null, alts);
                 or.isNullable = alts.IsNullable();
                 or.containsAnchors = alts.ContainsAnchors();
                 return or;
@@ -596,7 +549,7 @@ namespace Microsoft.SRM
                 return alts.GetTheElement();
             else
             {
-                var and = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.And, null, null, -1, -1, default(S), null, alts);
+                var and = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.And, null, null, null, -1, -1, default(S), null, alts);
                 and.isNullable = alts.IsNullable();
                 and.containsAnchors = alts.ContainsAnchors();
                 return and;
@@ -604,104 +557,75 @@ namespace Microsoft.SRM
         }
 
         /// <summary>
-        /// Only call MkConcat when left and right are flat, the resulting concat(left,right) is then also flat,
+        /// Only call MkConcat when regexes are flat, the resulting concat is then also flat,
         /// </summary>
-        internal static SymbolicRegexNode<S> MkConcat(SymbolicRegexBuilder<S> builder, SymbolicRegexNode<S> left, SymbolicRegexNode<S> right)
+        internal static SymbolicRegexNode<S> MkConcat(SymbolicRegexBuilder<S> builder, params SymbolicRegexNode<S>[] regexes)
+        {
+            return MkConcat(builder, (ICollection<SymbolicRegexNode<S>>)regexes);
+        }
+
+        /// <summary>
+        /// Only call MkConcat when regexes are flat, the resulting concat is then also flat,
+        /// </summary>
+        internal static SymbolicRegexNode<S> MkConcat(SymbolicRegexBuilder<S> builder, ICollection<SymbolicRegexNode<S>> regexes)
         {
             SymbolicRegexNode<S> concat;
-            if (left == builder.nothing || right == builder.nothing)
+            if (regexes.Count == 0)
+                return builder.epsilon;
+            if (regexes.Any(x => x == builder.nothing))
                 return builder.nothing;
-            else if (left.IsEpsilon)
-                return right;
-            else if (right.IsEpsilon)
-                return left;
-            else if (left.kind != SymbolicRegexKind.Concat)
+            int numChildren = regexes.Count;
+            bool isNullable = true;
+            bool containsAnchors = false;
+            bool containsConcats = false;
+            foreach (var r in regexes)
             {
-                concat = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Concat, left, right, -1, -1, default(S), null, null);
-                concat.isNullable = left.isNullable && right.isNullable;
-                concat.containsAnchors = left.containsAnchors || right.containsAnchors;
+                if (r.IsEpsilon)
+                {
+                    numChildren -= 1;
+                    continue;
+                }
+                isNullable &= r.isNullable;
+                containsAnchors |= r.containsAnchors;
+                containsConcats |= r.kind == SymbolicRegexKind.Concat;
+            }
+            if (numChildren == 1)
+            {
+                return regexes.First(r => !r.IsEpsilon);
+            }
+            else if (numChildren > 1)
+            {
+                ImmutableList<SymbolicRegexNode<S>> children;
+                if (!containsConcats && numChildren == regexes.Count) // No epsilon regexes or concats
+                {
+                    // This is a no-op when regexes is an ImmutableList already
+                    children = regexes.ToImmutableList();
+                }
+                else
+                {
+                    var childrenBuilder = ImmutableList.CreateBuilder<SymbolicRegexNode<S>>();
+                    foreach (var r in regexes)
+                    {
+                        if (r.IsEpsilon)
+                        {
+                            numChildren -= 1;
+                            continue;
+                        }
+                        if (r.kind == SymbolicRegexKind.Concat)
+                            childrenBuilder.AddRange(r.sequence);
+                        else
+                            childrenBuilder.Add(r);
+                    }
+                    children = childrenBuilder.ToImmutable();
+                }
+                concat = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Concat, null, null, children, -1, -1, default(S), null, null);
+                concat.isNullable = isNullable;
+                concat.containsAnchors = containsAnchors;
+                return concat;
             }
             else
             {
-                concat = right;
-                var left_elems = left.ToArray();
-                for (int i = left_elems.Length - 1; i >= 0; i = i - 1)
-                {
-                    var tmp = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Concat, left_elems[i], concat, -1, -1, default(S), null, null);
-                    tmp.isNullable = left_elems[i].isNullable && concat.isNullable;
-                    tmp.containsAnchors = left_elems[i].containsAnchors || concat.containsAnchors;
-                    concat = tmp;
-                }
-            }
-            return concat;
-        }
-
-
-        //internal SymbolicRegexNode<S> MkConcatWith(SymbolicRegexNode<S> that)
-        //{
-        //    switch (this.kind)
-        //    {
-        //        case SymbolicRegexKind.Concat:
-        //            {
-        //                var concat = that;
-        //                foreach (var node in this.EnumerateConcatElementsBackwards())
-        //                {
-        //                    var tmp = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Concat, node, concat, -1, -1, default(S), null, null);
-        //                    tmp.isNullable = node.isNullable && concat.isNullable;
-        //                    tmp.containsAnchors = node.containsAnchors || concat.containsAnchors;
-        //                    concat = tmp;
-        //                }
-        //                return concat;
-        //            }
-        //        case SymbolicRegexKind.Singleton:
-        //            {
-        //                if (that.kind == SymbolicRegexKind.Singleton)
-        //                {
-        //                    var seq = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Sequence, null, null, -1, -1, default(S), null, null, new ImmutableList<S>(this.set, that.set));
-        //                    seq.isNullable = false;
-        //                    seq.containsAnchors = false;
-        //                    return seq;
-        //                }
-        //                else if (that.kind == SymbolicRegexKind.Sequence)
-        //                {
-        //                    var seq = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Sequence, null, null, -1, -1, default(S), null, null, new ImmutableList<S>(this.set).Append(that.sequence));
-        //                    seq.isNullable = false;
-        //                    seq.containsAnchors = false;
-        //                    return seq;
-        //                }
-        //                else if (that.kind == SymbolicRegexKind.Concat)
-        //                {
-        //                    if (that.left.kind == SymbolicRegexKind.Singleton)
-        //                    {
-        //                        var seq = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Sequence, null, null, -1, -1, default(S), null, null, new ImmutableList<S>(this.set, that.left.set));
-        //                        seq.isNullable = false;
-        //                        seq.containsAnchors = false;
-        //                        var concat = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Concat, seq, that.right, -1, -1, default(S), null, null);
-        //                    }
-        //                }
-        //            }
-        //        default:
-        //            {
-        //                var concat = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Concat, this, that, -1, -1, default(S), null, null);
-        //                concat.isNullable = this.isNullable && that.isNullable;
-        //                concat.containsAnchors = this.containsAnchors || that.containsAnchors;
-        //                return concat;
-        //            }
-        //    }
-        //}
-
-        private IEnumerable<SymbolicRegexNode<S>> EnumerateConcatElementsBackwards()
-        {
-            switch (this.kind)
-            {
-                case SymbolicRegexKind.Concat:
-                    foreach (var elem in right.EnumerateConcatElementsBackwards())
-                        yield return elem;
-                    yield return left;
-                    yield break;
-                default:
-                    yield return this;
-                    yield break;
+                return builder.epsilon;
             }
         }
 
@@ -713,7 +637,7 @@ namespace Microsoft.SRM
             }
             else
             {
-                var ite = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.IfThenElse, left, right, -1, -1, default(S), cond, null);
+                var ite = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.IfThenElse, left, right, null, -1, -1, default(S), cond, null);
                 ite.isNullable = (cond.isNullable ? left.isNullable : right.isNullable);
                 ite.containsAnchors = (cond.containsAnchors || left.containsAnchors || right.containsAnchors);
                 return ite;
@@ -758,12 +682,11 @@ namespace Microsoft.SRM
                     }
                 case SymbolicRegexKind.Concat:
                     {
-                        var first = this.left.Restrict(pred);
-                        var second = this.right.Restrict(pred);
-                        if (first == this.left && second == this.right)
+                        var newSequence = sequence.ConvertAll(x => x.Restrict(pred));
+                        if (sequence.Zip(newSequence, (x, y) => x == y).All(x => x))
                             return this;
                         else
-                            return builder.MkConcat(first, second);
+                            return builder.MkConcat(newSequence);
                     }
                 case SymbolicRegexKind.Or:
                     {
@@ -815,14 +738,20 @@ namespace Microsoft.SRM
                     }
                 case SymbolicRegexKind.Concat:
                     {
-                        var left_length = this.left.GetFixedLength();
-                        if (left_length >= 0)
+                        int sum = 0;
+                        foreach (var child in sequence)
                         {
-                            var right_length = this.right.GetFixedLength();
-                            if (right_length >= 0)
-                                return left_length + right_length;
+                            var length = child.GetFixedLength();
+                            if (length >= 0)
+                            {
+                                sum += length;
+                            }
+                            else
+                            {
+                                return -1;
+                            }
                         }
-                        return -1;
+                        return sum;
                     }
                 case SymbolicRegexKind.Or:
                     {
@@ -978,7 +907,7 @@ namespace Microsoft.SRM
                         hashcode = kind.GetHashCode() ^ alts.GetHashCode();
                         break;
                     case SymbolicRegexKind.Concat:
-                        hashcode = left.GetHashCode() + (prime * right.GetHashCode());
+                        hashcode = sequence.Select(x => x.GetHashCode()).Aggregate((x, y) => x + prime * y);
                         break;
                     case SymbolicRegexKind.Singleton:
                         hashcode = kind.GetHashCode() ^ set.GetHashCode();
@@ -1012,7 +941,7 @@ namespace Microsoft.SRM
                 switch (this.kind)
                 {
                     case SymbolicRegexKind.Concat:
-                        return this.left.Equals(that.left) && this.right.Equals(that.right);
+                        return sequence.SequenceEqual(that.sequence);
                     case SymbolicRegexKind.Singleton:
                         return object.Equals(this.set, that.set);
                     //case SymbolicRegexKind.Sequence:
@@ -1071,8 +1000,10 @@ namespace Microsoft.SRM
                     }
                 case SymbolicRegexKind.Concat:
                     {
-                        left.CollectPredicates_helper(predicates);
-                        right.CollectPredicates_helper(predicates);
+                        foreach (var child in sequence)
+                        {
+                            child.CollectPredicates_helper(predicates);
+                        }
                         return;
                     }
                 default: //ITE
@@ -1128,17 +1059,7 @@ namespace Microsoft.SRM
                     return builder.MkLoop(this.left.Reverse(), this.isLazyLoop, this.lower, this.upper);
                 case SymbolicRegexKind.Concat:
                     {
-                        var rev = left.Reverse();
-                        var rest = this.right;
-                        while (rest.kind == SymbolicRegexKind.Concat)
-                        {
-                            var rev1 = rest.left.Reverse();
-                            rev = builder.MkConcat(rev1, rev);
-                            rest = rest.right;
-                        }
-                        var restr = rest.Reverse();
-                        rev = builder.MkConcat(restr, rev);
-                        return rev;
+                        return builder.MkConcat(sequence.Select(x => x.Reverse()).Reverse().ToArray());
                     }
                 case SymbolicRegexKind.Or:
                     {
@@ -1168,8 +1089,22 @@ namespace Microsoft.SRM
                 case SymbolicRegexKind.Loop:
                     return (this.upper < int.MaxValue) && (this.upper > upperBoundLowestValue);
                 case SymbolicRegexKind.Concat:
-                    return (this.left.StartsWithLoop(upperBoundLowestValue) ||
-                        (this.left.isNullable && this.right.StartsWithLoop(upperBoundLowestValue)));
+                    foreach (var child in sequence)
+                    {
+                        if (child.StartsWithLoop(upperBoundLowestValue))
+                        {
+                            return true;
+                        }
+                        else if (child.isNullable)
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            return false;
+                        }
+                    }
+                    return false;
                 case SymbolicRegexKind.Or:
                     return alts.StartsWithLoop(upperBoundLowestValue);
                 default:
@@ -1207,7 +1142,7 @@ namespace Microsoft.SRM
                             }
                         case SymbolicRegexKind.Concat:
                             {
-                                int n = this.left.EnabledBoundedLoopCount;
+                                int n = this.sequence[0].EnabledBoundedLoopCount;
                                 //if (this.left.IsNullable())
                                 //    n += this.right.EnabledBoundedLoopCount;
                                 enabledBoundedLoopCount = n;
@@ -1226,45 +1161,6 @@ namespace Microsoft.SRM
             }
         }
 
-        internal int EnabledBoundedLoopValue()
-        {
-
-            switch (kind)
-            {
-                case SymbolicRegexKind.EndAnchor:
-                case SymbolicRegexKind.StartAnchor:
-                case SymbolicRegexKind.Singleton:
-                case SymbolicRegexKind.WatchDog:
-                case SymbolicRegexKind.Epsilon:
-                    {
-                        return 0;
-                    }
-                case SymbolicRegexKind.Loop:
-                    {
-                        if (this.upper < int.MaxValue)
-                            return this.upper;
-                        else
-                            return 0;
-                    }
-                case SymbolicRegexKind.Concat:
-                    {
-                        return this.left.EnabledBoundedLoopValue();
-                    }
-                case SymbolicRegexKind.Or:
-                    {
-                        foreach (var alt in this.alts)
-                        {
-                            var k = alt.EnabledBoundedLoopValue();
-                            if (k > 0)
-                                return k;
-                        }
-                        return 0;
-                    }
-                default:
-                    throw new NotImplementedException(kind.ToString());
-            }
-        }
-
         /// <summary>
         /// Unwind lower loop boundaries
         /// </summary>
@@ -1279,7 +1175,7 @@ namespace Microsoft.SRM
                 case SymbolicRegexKind.WatchDog:
                     return this;
                 case SymbolicRegexKind.Concat:
-                    return builder.MkConcat(left.Simplify(), right.Simplify());
+                    return builder.MkConcat(sequence.Select(x => x.Simplify()).ToArray());
                 case SymbolicRegexKind.Or:
                     return builder.MkOr(alts.Simplify());
                 case SymbolicRegexKind.And:
@@ -1339,7 +1235,8 @@ namespace Microsoft.SRM
                         }
                     case SymbolicRegexKind.Concat:
                         {
-                            return builder.MkConcat(left.DecrementBoundedLoopCount(makeZero), right);
+                            var xs = sequence.Take(1).Select(x => x.DecrementBoundedLoopCount(makeZero)).Concat(sequence.Skip(1)).ToImmutableList();
+                            return builder.MkConcat(xs);
                         }
                     case SymbolicRegexKind.Or:
                         {
@@ -1490,10 +1387,18 @@ namespace Microsoft.SRM
                         }
                     case SymbolicRegexKind.Concat:
                         {
-                            if (this.left.kind == SymbolicRegexKind.Singleton)
-                                return this.right.GetPrefixSequence(pref.Add(this.left.set), lengthBound - 1);
-                            else
-                                return pref;
+                            foreach (var child in sequence) {
+                                if (child.kind == SymbolicRegexKind.Singleton)
+                                {
+                                    pref = pref.Add(child.set);
+                                    lengthBound -= 1;
+                                }
+                                else
+                                {
+                                    return child.GetPrefixSequence(pref, lengthBound);
+                                }
+                            }
+                            return pref;
                         }
                     case SymbolicRegexKind.Or:
                     case SymbolicRegexKind.And:
@@ -1550,32 +1455,26 @@ namespace Microsoft.SRM
             {
                 if (sequenceOfSingletons_count == 0)
                 {
-                    var node = this;
-                    int k = 1;
-                    while (node.kind == SymbolicRegexKind.Concat && node.left.kind == SymbolicRegexKind.Singleton)
+                    switch (kind)
                     {
-                        node = node.right;
-                        k += 1;
-                    }
-                    if (node.kind == SymbolicRegexKind.Singleton)
-                    {
-                        node.sequenceOfSingletons_count = 1;
-                        node = this;
-                        while (node.kind == SymbolicRegexKind.Concat)
+                        case SymbolicRegexKind.Concat:
                         {
-                            node.sequenceOfSingletons_count = k;
-                            node = node.right;
-                            k = k - 1;
+                            foreach (var child in sequence)
+                            {
+                                Debug.Assert(child.kind != SymbolicRegexKind.Concat);
+                                if (child.kind != SymbolicRegexKind.Singleton)
+                                {
+                                    sequenceOfSingletons_count = -1;
+                                    return false;
+                                }
+                            }
+                            sequenceOfSingletons_count = 1;
+                            return true;
                         }
-                    }
-                    else
-                    {
-                        node.sequenceOfSingletons_count = -1;
-                        node = this;
-                        while (node.kind == SymbolicRegexKind.Concat && node.left.kind == SymbolicRegexKind.Singleton)
+                        case SymbolicRegexKind.Singleton:
                         {
-                            node.sequenceOfSingletons_count = -1;
-                            node = node.right;
+                            sequenceOfSingletons_count = 1;
+                            return true;
                         }
                     }
                 }
@@ -1597,17 +1496,27 @@ namespace Microsoft.SRM
                     return algebra.False;
                 case SymbolicRegexKind.Singleton:
                     return this.set;
-                //case SymbolicRegexKind.Sequence:
-                //    return this.sequence.First;
                 case SymbolicRegexKind.Loop:
                     return this.left.GetStartSet(algebra);
                 case SymbolicRegexKind.Concat:
                     {
-                        var startSet = this.left.GetStartSet(algebra);
-                        if (left.isNullable || left.kind == SymbolicRegexKind.StartAnchor)
+                        S startSet = default(S);
+                        bool first = true;
+                        foreach (var child in sequence)
                         {
-                            var set2 = this.right.GetStartSet(algebra);
-                            startSet = algebra.MkOr(startSet, set2);
+                            if (first)
+                            {
+                                startSet = child.GetStartSet(algebra);
+                                first = false;
+                            }
+                            else
+                            {
+                                startSet = algebra.MkOr(startSet, child.GetStartSet(algebra));
+                            }
+                            if (!(child.isNullable || child.kind == SymbolicRegexKind.StartAnchor))
+                            {
+                                break;
+                            }
                         }
                         return startSet;
                     }
@@ -1644,7 +1553,7 @@ namespace Microsoft.SRM
                 switch (kind)
                 {
                     case SymbolicRegexKind.Concat:
-                        return left.ExistsNode(pred) || right.ExistsNode(pred);
+                        return sequence.Any(x => x.ExistsNode(pred));
                     case SymbolicRegexKind.Or:
                     case SymbolicRegexKind.And:
                         foreach (var node in this.alts)
@@ -1700,7 +1609,7 @@ namespace Microsoft.SRM
                             }
                         case SymbolicRegexKind.Concat:
                             {
-                                return left.IsSinglePass && right.IsSinglePass;
+                                return sequence.All(x => x.IsSinglePass);
                             }
                         default:
                             return false;
@@ -1879,19 +1788,20 @@ namespace Microsoft.SRM
                                                 loops[pair] = alt.upper;
                                             }
                                         }
-                                        else if (alt.kind == SymbolicRegexKind.Concat && alt.left.kind == SymbolicRegexKind.Loop && alt.left.lower == 0)
+                                        else if (alt.kind == SymbolicRegexKind.Concat && alt.sequence[0].kind == SymbolicRegexKind.Loop && alt.sequence[0].lower == 0)
                                         {
-                                            var pair = new Tuple<SymbolicRegexNode<S>, SymbolicRegexNode<S>>(alt.left.left, alt.right);
+                                            var cont = SymbolicRegexNode<S>.MkConcat(builder, alt.sequence.RemoveAt(0));
+                                            var pair = new Tuple<SymbolicRegexNode<S>, SymbolicRegexNode<S>>(alt.sequence[0].left, cont);
                                             //map to the maximal of the upper bounds
                                             int cnt;
                                             if (loops.TryGetValue(pair, out cnt))
                                             {
-                                                if (cnt < alt.left.upper)
-                                                    loops[pair] = alt.left.upper;
+                                                if (cnt < alt.sequence[0].upper)
+                                                    loops[pair] = alt.sequence[0].upper;
                                             }
                                             else
                                             {
-                                                loops[pair] = alt.left.upper;
+                                                loops[pair] = alt.sequence[0].upper;
                                             }
                                         }
                                         else
@@ -1926,19 +1836,20 @@ namespace Microsoft.SRM
                                 }
                             case SymbolicRegexKind.Concat:
                                 {
-                                    if (elem.kind == SymbolicRegexKind.Concat && elem.left.kind == SymbolicRegexKind.Loop && elem.left.lower == 0)
+                                    if (elem.kind == SymbolicRegexKind.Concat && elem.sequence[0].kind == SymbolicRegexKind.Loop && elem.sequence[0].lower == 0)
                                     {
-                                        var pair = new Tuple<SymbolicRegexNode<S>, SymbolicRegexNode<S>>(elem.left.left, elem.right);
+                                        var cont = SymbolicRegexNode<S>.MkConcat(builder, elem.sequence.RemoveAt(0));
+                                        var pair = new Tuple<SymbolicRegexNode<S>, SymbolicRegexNode<S>>(elem.sequence[0].left, cont);
                                         //map to the maximal of the upper bounds
                                         int cnt;
                                         if (loops.TryGetValue(pair, out cnt))
                                         {
-                                            if (cnt < elem.left.upper)
-                                                loops[pair] = elem.left.upper;
+                                            if (cnt < elem.sequence[0].upper)
+                                                loops[pair] = elem.sequence[0].upper;
                                         }
                                         else
                                         {
-                                            loops[pair] = elem.left.upper;
+                                            loops[pair] = elem.sequence[0].upper;
                                         }
                                     }
                                     else
