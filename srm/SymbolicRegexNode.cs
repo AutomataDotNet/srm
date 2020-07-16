@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -641,6 +641,88 @@ namespace Microsoft.SRM
                 ite.isNullable = (cond.isNullable ? left.isNullable : right.isNullable);
                 ite.containsAnchors = (cond.containsAnchors || left.containsAnchors || right.containsAnchors);
                 return ite;
+            }
+        }
+
+        /// <summary>
+        /// Produce a string representation of the symbolic regex. 
+        /// </summary>
+        public override string ToString()
+        {
+
+            switch (this.kind)
+            {
+                case SymbolicRegexKind.StartAnchor:
+                    {
+                        return "^";
+                    }
+                case SymbolicRegexKind.EndAnchor:
+                    {
+                        return "$";
+                    }
+                case SymbolicRegexKind.WatchDog:
+                    {
+                        return "()" + SpecialCharacters.ToSubscript(lower);
+                    }
+                case SymbolicRegexKind.Epsilon:
+                    {
+                        return "()";
+                    }
+                case SymbolicRegexKind.Singleton:
+                    {
+                        // TODO: Add pretty printing here, such that sets are mapped
+                        // back to human readable format. The Automata library has this
+                        // functionality, but it has not been ported to SRM yet.
+                        return "[" + builder.solver.SerializePredicate(this.set) + "]";
+                    }
+                case SymbolicRegexKind.Loop:
+                    {
+                        var body = this.left.ToString();
+                        if (this.left.kind != SymbolicRegexKind.Singleton)
+                            body = "(" + body + ")";
+                        if (this.IsMaybe)
+                            return body + "?";
+                        else if (this.IsStar)
+                            return body + "*";
+                        else if (this.IsPlus)
+                            return body + "+";
+                        else
+                        {
+                            string bounds = this.lower.ToString();
+                            if (this.upper > this.lower)
+                            {
+                                bounds += ",";
+                                if (this.upper < int.MaxValue)
+                                    bounds += this.upper.ToString();
+                            }
+                            return body + "{" + bounds + "}";
+                        }
+                    }
+                case SymbolicRegexKind.Concat:
+                    {
+                        string s = "";
+                        foreach (var child in sequence)
+                        {
+                            if (child.kind == SymbolicRegexKind.Or)
+                            {
+                                s += "(" + child.ToString() + ")";
+                            }
+                            else
+                            {
+                                s += child.ToString();
+                            }
+                        }
+                        return s;
+                    }
+                case SymbolicRegexKind.Or:
+                case SymbolicRegexKind.And:
+                    {
+                        return this.alts.ToString();
+                    }
+                default: //if-then-else
+                    {
+                        return "(?(" + this.iteCond.ToString() + ")(" + this.left.ToString() + ")|(" + this.right.ToString() + "))";
+                    }
             }
         }
 
