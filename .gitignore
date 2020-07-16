@@ -1,6 +1,7 @@
 # IDE directories
 .vs/
 .vscode/
+omnisharp.json
 
 # Build directories
 bin/
