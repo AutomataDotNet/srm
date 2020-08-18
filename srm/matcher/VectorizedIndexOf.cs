@@ -14,6 +14,8 @@ namespace Microsoft.SRM
         static int vecUintSize = Vector<uint>.Count;    
         static int vecByteSize = Vector<byte>.Count;
 
+#if UNSAFE
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal unsafe static int UnsafeIndexOf(char* chars, int length, int start, string toMatch)
         {
@@ -289,6 +291,27 @@ namespace Microsoft.SRM
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal unsafe static int UnsafeIndexOfByte(byte[] input, int i, byte toMatch, Vector<byte> toMatchVec)
+        {
+            var length = input.Length;
+            int lastVec = length - vecByteSize;
+            fixed (byte* bytes = input)
+            {
+                for (; i <= lastVec; i += vecByteSize)
+                {
+                    var vec = Unsafe.Read<Vector<byte>>(bytes + i);
+                    if (Vector.EqualsAny(vec, toMatchVec))
+                    {
+                        return Array.IndexOf<byte>(input, toMatch, i);
+                    }
+                }
+                return Array.IndexOf<byte>(input, toMatch, i);
+            }
+        }
+
+#endif
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int IndexOfByte(byte[] input, int i, byte toMatch, Vector<byte> toMatchVec)
         {
             int lastVec = input.Length - vecByteSize;
@@ -336,25 +359,6 @@ namespace Microsoft.SRM
                 return i;
             else
                 return -1;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal unsafe static int UnsafeIndexOfByte(byte[] input, int i, byte toMatch, Vector<byte> toMatchVec)
-        {
-            var length = input.Length;
-            int lastVec = length - vecByteSize;
-            fixed (byte* bytes = input)
-            {
-                for (; i <= lastVec; i += vecByteSize)
-                {
-                    var vec = Unsafe.Read<Vector<byte>>(bytes + i);
-                    if (Vector.EqualsAny(vec, toMatchVec))
-                    {
-                        return Array.IndexOf<byte>(input, toMatch, i);
-                    }
-                }
-                return Array.IndexOf<byte>(input, toMatch, i);
-            }
         }
     }
 }

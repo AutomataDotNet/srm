@@ -150,5 +150,20 @@ namespace Microsoft.SRM.Tests
             Assert.AreEqual<int>(3, matches.Count);
             CollectionAssert.AreEqual(expectedMatches, matches);
         }
+
+        [TestMethod]
+        public void UncompiledVectorization()
+        {
+            var pattern = @"\w"; // This will trigger the binary tree based start set search
+            var r = new System.Text.RegularExpressions.Regex(pattern, RegexOptions.Singleline);
+            var sr1 = new Regex(pattern, RegexOptions.Singleline);
+            var sr2 = new Regex(pattern, RegexOptions.Singleline | RegexOptions.UncompiledVectorization);
+            var input1 = "a";
+            AssertIsMatchesAgree(r, sr1, input1, true);
+            AssertIsMatchesAgree(r, sr2, input1, true);
+            var input2 = "&";
+            AssertIsMatchesAgree(r, sr1, input2, false);
+            AssertIsMatchesAgree(r, sr2, input2, false);
+        }
     }
 }

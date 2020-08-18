@@ -3,8 +3,10 @@ using System.Diagnostics;
 
 namespace Microsoft.SRM
 {
+    [Serializable]
     public struct RegexOptions
     {
+        // .NET compatible options
         public static RegexOptions None = new RegexOptions(0);
         public static RegexOptions IgnoreCase = new RegexOptions(1);
         public static RegexOptions Multiline = new RegexOptions(2);
@@ -12,6 +14,9 @@ namespace Microsoft.SRM
         public static RegexOptions IgnorePatternWhitespace = new RegexOptions(8);
         public static RegexOptions CultureInvariant = new RegexOptions(16);
         public static RegexOptions ECMAScript = new RegexOptions(32);
+
+        // SRM specific options
+        public static RegexOptions UncompiledVectorization = new RegexOptions(1024);
 
         private int value;
 
@@ -52,12 +57,20 @@ namespace Microsoft.SRM
                     handledOptions |= o;
                 }
             };
+            Action<RegexOptions> ignoreOption = t =>
+            {
+                if ((ourOptions & t) != 0)
+                {
+                    handledOptions |= t;
+                }
+            };
             handleEquivalentOption(IgnoreCase, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             handleEquivalentOption(Multiline, System.Text.RegularExpressions.RegexOptions.Multiline);
             handleEquivalentOption(Singleline, System.Text.RegularExpressions.RegexOptions.Singleline);
             handleEquivalentOption(IgnorePatternWhitespace, System.Text.RegularExpressions.RegexOptions.IgnorePatternWhitespace);
             handleEquivalentOption(CultureInvariant, System.Text.RegularExpressions.RegexOptions.CultureInvariant);
             handleEquivalentOption(ECMAScript, System.Text.RegularExpressions.RegexOptions.ECMAScript);
+            ignoreOption(UncompiledVectorization);
             Debug.Assert(handledOptions == ourOptions);
             return theirOptions;
         }

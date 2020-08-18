@@ -28,12 +28,12 @@ namespace Microsoft.SRM
             if (partition.Length > 64)
             {
                 //more than 64 bits needed to represent a set
-                matcher = new SymbolicRegexBV(root, solver, converter.srBuilder, partition);
+                matcher = new SymbolicRegexBV(root, solver, converter.srBuilder, partition, options);
             }
             else
             {
                 //enough to use 64 bits
-                matcher = new SymbolicRegexUInt64(root, solver, converter.srBuilder, partition);
+                matcher = new SymbolicRegexUInt64(root, solver, converter.srBuilder, partition, options);
             }
         }
 
