@@ -1573,11 +1573,7 @@ namespace Microsoft.SRM
             {
                 if (q == q0_A1)
                 {
-                    if (this.A_StartSet_Vec == null)
-                    {
-                        i = IndexOfStartset_(inputp, k, i);
-                    }
-                    else if (A_StartSet_Vec.Length == 1)
+                    if (this.A_StartSet_Vec != null && A_StartSet_Vec.Length == 1)
                     {
                         i = VectorizedIndexOf.UnsafeIndexOf1(inputp, k, i, this.A_StartSet_singleton, A_StartSet_Vec[0]);
                     }
@@ -1587,7 +1583,7 @@ namespace Microsoft.SRM
                     }
                     else
                     {
-                        i = VectorizedIndexOf.UnsafeIndexOf(inputp, k, i, this.A_StartSet);
+                        i = IndexOfStartset_(inputp, k, i);
                     }
 
                     if (i == -1)
