@@ -220,6 +220,15 @@ namespace Microsoft.SRM
 
         /// <summary>
         /// Make a concatenation of given regexes, if any regex is nothing then return nothing, eliminate 
+        /// intermediate epsilons
+        /// </summary>
+        public SymbolicRegexNode<S> MkConcat(ImmutableList<SymbolicRegexNode<S>> regexes)
+        {
+            return SymbolicRegexNode<S>.MkConcat(this, regexes);
+        }
+
+        /// <summary>
+        /// Make a concatenation of given regexes, if any regex is nothing then return nothing, eliminate 
         /// intermediate epsilons, if toplevel, add watchdog at the end
         /// </summary>
         public SymbolicRegexNode<S> MkConcat(SymbolicRegexNode<S>[] regexes, bool topLevel)

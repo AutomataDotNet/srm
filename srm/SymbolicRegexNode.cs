@@ -598,7 +598,6 @@ namespace Microsoft.SRM
                 ImmutableList<SymbolicRegexNode<S>> children;
                 if (!containsConcats && numChildren == regexes.Count) // No epsilon regexes or concats
                 {
-                    // This is a no-op when regexes is an ImmutableList already
                     children = regexes.ToImmutableList();
                 }
                 else
@@ -607,10 +606,7 @@ namespace Microsoft.SRM
                     foreach (var r in regexes)
                     {
                         if (r.IsEpsilon)
-                        {
-                            numChildren -= 1;
                             continue;
-                        }
                         if (r.kind == SymbolicRegexKind.Concat)
                             childrenBuilder.AddRange(r.sequence);
                         else
@@ -619,6 +615,50 @@ namespace Microsoft.SRM
                     children = childrenBuilder.ToImmutable();
                 }
                 concat = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Concat, null, null, children, -1, -1, default(S), null, null);
+                concat.isNullable = isNullable;
+                concat.containsAnchors = containsAnchors;
+                return concat;
+            }
+            else
+            {
+                return builder.epsilon;
+            }
+        }
+
+        /// <summary>
+        /// Only call MkConcat when regexes are flat, the resulting concat is then also flat,
+        /// </summary>
+        internal static SymbolicRegexNode<S> MkConcat(SymbolicRegexBuilder<S> builder, ImmutableList<SymbolicRegexNode<S>> regexes)
+        {
+            SymbolicRegexNode<S> concat;
+            var childrenBuilder = regexes.ToBuilder();
+            bool isNullable = true;
+            bool containsAnchors = false;
+            for (int i = childrenBuilder.Count - 1; i >= 0; --i) // Not ideal, but there aren't good ways to iterate and remove from ImmutableList
+            {
+                var r = childrenBuilder[i];
+                if (r == builder.nothing)
+                    return builder.nothing;
+                if (r.IsEpsilon)
+                {
+                    childrenBuilder.RemoveAt(i);
+                }
+                if (r.kind == SymbolicRegexKind.Concat)
+                {
+                    var childConcat = childrenBuilder[i];
+                    childrenBuilder.RemoveAt(i);
+                    childrenBuilder.InsertRange(i, childConcat.sequence);
+                }
+                isNullable &= r.isNullable;
+                containsAnchors |= r.containsAnchors;
+            }
+            if (childrenBuilder.Count == 1)
+            {
+                return childrenBuilder[0];
+            }
+            else if (childrenBuilder.Count > 1)
+            {
+                concat = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.Concat, null, null, childrenBuilder.ToImmutable(), -1, -1, default(S), null, null);
                 concat.isNullable = isNullable;
                 concat.containsAnchors = containsAnchors;
                 return concat;
@@ -989,7 +1029,12 @@ namespace Microsoft.SRM
                         hashcode = kind.GetHashCode() ^ alts.GetHashCode();
                         break;
                     case SymbolicRegexKind.Concat:
-                        hashcode = sequence.Select(x => x.GetHashCode()).Aggregate((x, y) => x + prime * y);
+                        var hash = 0;
+                        for (int i = 0; i < sequence.Count; ++i)
+                        {
+                            hash += prime * sequence[i].GetHashCode();
+                        }
+                        hashcode = hash;
                         break;
                     case SymbolicRegexKind.Singleton:
                         hashcode = kind.GetHashCode() ^ set.GetHashCode();
