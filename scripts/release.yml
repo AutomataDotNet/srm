@@ -7,14 +7,14 @@ pool:
   vmImage: "windows-latest"
 
 steps:
-- script: dotnet build srm --configuration Release -p:BuildType=Official
+- script: dotnet build srm --configuration Release -p:BuildType=Official --output $(Build.ArtifactStagingDirectory)
   displayName: 'Build'
 - task: EsrpCodeSigning@1
   displayName: 'StrongName sign'
   inputs:
     ConnectedServiceName: 'srm-esrp-signing'
     FolderPath: $(Build.ArtifactStagingDirectory)
-    Pattern: Microsoft.Automata.SRM.$(ReleaseVersion).nupkg
+    Pattern: srm.dll
     signConfigType: 'inlineSignParams'
     inlineOperation: |
       [
@@ -36,7 +36,7 @@ steps:
     SessionTimeout: '60'
     MaxConcurrency: '50'
     MaxRetryAttempts: '5'
-- script: dotnet pack srm /p:PackageVersion=$(ReleaseVersion) --output $(Build.ArtifactStagingDirectory) --no-build
+- script: dotnet pack srm /p:PackageVersion=$(ReleaseVersion) --output $(Build.ArtifactStagingDirectory) --no-build /p:OutputPath=$(Build.ArtifactStagingDirectory)
   displayName: 'Pack'
 - task: EsrpCodeSigning@1
   displayName: 'NuGet sign'
