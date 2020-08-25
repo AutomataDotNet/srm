@@ -14,6 +14,8 @@ namespace Microsoft.SRM
         static int vecUintSize = Vector<uint>.Count;    
         static int vecByteSize = Vector<byte>.Count;
 
+#if UNSAFE
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal unsafe static int UnsafeIndexOf(char* chars, int length, int start, string toMatch)
         {
@@ -74,94 +76,6 @@ namespace Microsoft.SRM
                 }
                 return -1;
             }
-        }
-
-        internal static Func<Vector<ushort>, Vector<ushort>> CompileBooleanDecisionTree(BooleanDecisionTree toMatch)
-        {
-            var ushortArgList = new[] { typeof(ushort) };
-            int nextVarIdx = 0;
-            Func<ParameterExpression> getVecVar = () => Expression.Parameter(typeof(Vector<ushort>), "var" + (nextVarIdx++));
-
-            var input = getVecVar();
-            var accumulator = getVecVar();
-
-            Func<DecisionTree.BST, Expression, Expression> nodeToExpression = null;
-            nodeToExpression = (expr, current) =>
-            {
-                if (expr.IsLeaf)
-                {
-                    if (expr.Node == 1)
-                    {
-                        return Expression.Block(
-                            Expression.AddAssign(accumulator, current));
-                    }
-                    else
-                    {
-                        return Expression.Empty();
-                    }
-                } else
-                {
-                    var compared = getVecVar();
-                    var left = getVecVar();
-                    var right = getVecVar();
-                    var stmts = new List<Expression>();
-                    stmts.Add(Expression.Assign(compared, Expression.Call(typeof(Vector), "LessThan", ushortArgList, input, Expression.Constant(new Vector<ushort>((ushort)expr.Node)))));
-                    if (!expr.Left.IsLeaf || expr.Left.Node == 1)
-                    {
-                        stmts.Add(Expression.Assign(left, Expression.And(current, compared)));
-                        stmts.Add(Expression.IfThen(Expression.Not(Expression.Call(typeof(Vector), "EqualsAll", ushortArgList, left, Expression.Constant(Vector<ushort>.Zero))),
-                                nodeToExpression(expr.Left, left)));
-                    }
-                    if (!expr.Right.IsLeaf || expr.Right.Node == 1)
-                    {
-                        stmts.Add(Expression.Assign(right, Expression.And(current, Expression.OnesComplement(compared))));
-                        stmts.Add(Expression.IfThen(Expression.Not(Expression.Call(typeof(Vector), "EqualsAll", ushortArgList, right, Expression.Constant(Vector<ushort>.Zero))),
-                                nodeToExpression(expr.Right, right)));
-                    }
-                    return Expression.Block(
-                        new[] { compared, left, right },
-                        stmts.ToArray()
-                        ); // TODO: remove unnecessary branches
-                }
-            };
-
-            LabelTarget returnTarget = Expression.Label(typeof(Vector<ushort>));
-            GotoExpression returnExpression = Expression.Return(returnTarget,
-                accumulator, typeof(Vector<ushort>));
-            LabelExpression returnLabel = Expression.Label(returnTarget, accumulator);
-
-            var func = Expression.Lambda<Func<Vector<ushort>, Vector<ushort>>>(Expression.Block(
-                new ParameterExpression[] { accumulator },
-                nodeToExpression(toMatch.bst, Expression.Constant(Vector<ushort>.One)),
-                returnExpression,
-                returnLabel
-                ), input);
-            return func.Compile();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal unsafe static int UnsafeIndexOf(char* chars, int length, int start, BooleanDecisionTree toMatch, Func<Vector<ushort>, Vector<ushort>> toMatchCompiled)
-        {
-            //System.Diagnostics.Debug.Assert(Vector.IsHardwareAccelerated);
-            int i = start;
-            int lastVec = length - vecUshortSize;
-            for (; i <= lastVec; i += vecUshortSize)
-            {
-                var vec = Unsafe.Read<Vector<ushort>>(chars + i);
-                var matching = toMatchCompiled(vec);
-                if (!Vector.EqualsAll(matching, Vector<ushort>.Zero))
-                {
-                    for (int j = 0; j < vecUshortSize; ++j)
-                    {
-                        if (matching[j] != 0) return i + j;
-                    }
-                }
-            }
-            for (; i < length; ++i)
-            {
-                if (toMatch.Contains(chars[i])) return i;
-            }
-            return -1;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -289,6 +203,27 @@ namespace Microsoft.SRM
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal unsafe static int UnsafeIndexOfByte(byte[] input, int i, byte toMatch, Vector<byte> toMatchVec)
+        {
+            var length = input.Length;
+            int lastVec = length - vecByteSize;
+            fixed (byte* bytes = input)
+            {
+                for (; i <= lastVec; i += vecByteSize)
+                {
+                    var vec = Unsafe.Read<Vector<byte>>(bytes + i);
+                    if (Vector.EqualsAny(vec, toMatchVec))
+                    {
+                        return Array.IndexOf<byte>(input, toMatch, i);
+                    }
+                }
+                return Array.IndexOf<byte>(input, toMatch, i);
+            }
+        }
+
+#endif
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int IndexOfByte(byte[] input, int i, byte toMatch, Vector<byte> toMatchVec)
         {
             int lastVec = input.Length - vecByteSize;
@@ -336,25 +271,6 @@ namespace Microsoft.SRM
                 return i;
             else
                 return -1;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal unsafe static int UnsafeIndexOfByte(byte[] input, int i, byte toMatch, Vector<byte> toMatchVec)
-        {
-            var length = input.Length;
-            int lastVec = length - vecByteSize;
-            fixed (byte* bytes = input)
-            {
-                for (; i <= lastVec; i += vecByteSize)
-                {
-                    var vec = Unsafe.Read<Vector<byte>>(bytes + i);
-                    if (Vector.EqualsAny(vec, toMatchVec))
-                    {
-                        return Array.IndexOf<byte>(input, toMatch, i);
-                    }
-                }
-                return Array.IndexOf<byte>(input, toMatch, i);
-            }
         }
     }
 }

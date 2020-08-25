@@ -150,5 +150,20 @@ namespace Microsoft.SRM.Tests
             Assert.AreEqual<int>(3, matches.Count);
             CollectionAssert.AreEqual(expectedMatches, matches);
         }
+
+        [TestMethod]
+        public void Vectorize()
+        {
+            var pattern = @"^\w\d\w{1,8}$";
+            var r = new System.Text.RegularExpressions.Regex(pattern);
+            var sr = new Regex(pattern, RegexOptions.Vectorize);
+            AssertIsMatchesAgree(r, sr, "a0d", true);
+            AssertIsMatchesAgree(r, sr, "a0", false);
+            AssertIsMatchesAgree(r, sr, "a5def", true);
+            AssertIsMatchesAgree(r, sr, "aa", false);
+            AssertIsMatchesAgree(r, sr, "a3abcdefg", true);
+            AssertIsMatchesAgree(r, sr, "a3abcdefgh", true);
+            AssertIsMatchesAgree(r, sr, "a3abcdefghi", false);
+        }
     }
 }

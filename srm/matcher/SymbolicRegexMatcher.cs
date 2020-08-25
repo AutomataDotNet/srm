@@ -15,9 +15,9 @@ namespace Microsoft.SRM
     public class SymbolicRegexBV : SymbolicRegex<BV>
     {
         private SymbolicRegexBV(SymbolicRegexBuilder<BV> builder, SymbolicRegexNode<BDD> sr,
-                                CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, int StateLimit, int startSetSizeLimit)
+                                CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, RegexOptions options, int StateLimit, int startSetSizeLimit)
             : base(srBuilder.Transform(sr, builder, builder.solver.ConvertFromCharSet),
-                  solver, minterms, StateLimit, startSetSizeLimit)
+                  solver, minterms, options, StateLimit, startSetSizeLimit)
         {
         }
 
@@ -25,9 +25,9 @@ namespace Microsoft.SRM
         /// Is called with minterms.Length at least 65
         /// </summary>
         internal SymbolicRegexBV(SymbolicRegexNode<BDD> sr,
-                                 CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, int StateLimit = 1000, int startSetSizeLimit = 1)
+                                 CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, RegexOptions options, int StateLimit = 1000, int startSetSizeLimit = 1)
             : this(new SymbolicRegexBuilder<BV>(BVAlgebra.Create(solver, minterms)), sr,
-                  solver, srBuilder, minterms, StateLimit, startSetSizeLimit)
+                  solver, srBuilder, minterms, options, StateLimit, startSetSizeLimit)
         {
         }
 
@@ -46,9 +46,9 @@ namespace Microsoft.SRM
     public class SymbolicRegexUInt64 : SymbolicRegex<ulong>
     {
         private SymbolicRegexUInt64(SymbolicRegexBuilder<ulong> builder, SymbolicRegexNode<BDD> sr,
-                                CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, int StateLimit, int startSetSizeLimit)
+                                CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, RegexOptions options, int StateLimit, int startSetSizeLimit)
             : base(srBuilder.Transform(sr, builder, builder.solver.ConvertFromCharSet),
-                  solver, minterms, StateLimit, startSetSizeLimit)
+                  solver, minterms, options, StateLimit, startSetSizeLimit)
         {
         }
 
@@ -56,9 +56,9 @@ namespace Microsoft.SRM
         /// Is called with minterms.Length at most 64
         /// </summary>
         internal SymbolicRegexUInt64(SymbolicRegexNode<BDD> sr,
-                                 CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, int StateLimit = 1000, int startSetSizeLimit = 1)
+                                 CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, RegexOptions options, int StateLimit = 1000, int startSetSizeLimit = 1)
             : this(new SymbolicRegexBuilder<ulong>(BV64Algebra.Create(solver, minterms)), sr,
-                  solver, srBuilder, minterms, StateLimit, startSetSizeLimit)
+                  solver, srBuilder, minterms, options, StateLimit, startSetSizeLimit)
         {
         }
 
@@ -123,6 +123,7 @@ namespace Microsoft.SRM
         [NonSerialized]
         int nextStateId = 4;
 
+#if UNSAFE
         /// <summary>
         /// If not null then contains all relevant start characters as vectors
         /// </summary>
@@ -134,6 +135,7 @@ namespace Microsoft.SRM
         /// </summary>
         [NonSerialized]
         ushort A_StartSet_singleton;
+#endif
 
         /// <summary>
         /// First byte of A_prefixUTF8 in vector
@@ -150,6 +152,11 @@ namespace Microsoft.SRM
         bool A_allLoopsAreLazy = false;
         [NonSerialized]
         bool A_containsLazyLoop = false;
+
+        /// <summary>
+        /// The RegexOptions this regex was created with
+        /// </summary>
+        public RegexOptions Options { get; set; }
 
         /// <summary>
         /// Main pattern of the matcher
@@ -188,12 +195,6 @@ namespace Microsoft.SRM
         /// Set of elements that matter as first element of A. 
         /// </summary>
         internal BooleanDecisionTree A_StartSet;
-
-        /// <summary>
-        /// A vectorized decision stree evaluator generated and compiled from  A_StartSet. 
-        /// </summary>
-        [NonSerialized]
-        internal Func<Vector<ushort>, Vector<ushort>> A_StartSet_compiled;
 
         /// <summary>
         /// predicate over characters that make some progress
@@ -349,6 +350,7 @@ namespace Microsoft.SRM
 
                 info.AddValue("solver", simpl_bvalg);
                 info.AddValue("A", A.Serialize());
+                info.AddValue("Options", (object)Options);
 
                 info.AddValue("StateLimit", StateLimit);
                 info.AddValue("StartSetSizeLimit", StartSetSizeLimit);
@@ -403,6 +405,7 @@ namespace Microsoft.SRM
             {
                 info.AddValue("solver", this.builder.solver);
                 info.AddValue("A", A.Serialize());
+                info.AddValue("Options", (object)Options);
 
                 info.AddValue("StateLimit", StateLimit);
                 info.AddValue("StartSetSizeLimit", StartSetSizeLimit);
@@ -425,6 +428,8 @@ namespace Microsoft.SRM
         /// </summary>
         public SymbolicRegex(SerializationInfo info, StreamingContext context)
         {
+            this.Options = (RegexOptions)info.GetValue("Options", typeof(RegexOptions));
+
             var solver = (ICharAlgebra<S>)info.GetValue("solver", typeof(ICharAlgebra<S>));
             this.builder = new SymbolicRegexBuilder<S>(solver);
 
@@ -475,8 +480,9 @@ namespace Microsoft.SRM
         /// <summary>
         /// Constructs matcher for given symbolic regex
         /// </summary>
-        internal SymbolicRegex(SymbolicRegexNode<S> sr, CharSetSolver css, BDD[] minterms, int StateLimit = 1000, int startSetSizeLimit = 128)
+        internal SymbolicRegex(SymbolicRegexNode<S> sr, CharSetSolver css, BDD[] minterms, RegexOptions options, int StateLimit = 1000, int startSetSizeLimit = 128)
         {
+            this.Options = options;
             this.StartSetSizeLimit = startSetSizeLimit;
             this.builder = sr.builder;
             this.StateLimit = StateLimit;
@@ -571,14 +577,14 @@ namespace Microsoft.SRM
 
         private void InitializeVectors()
         {
+#if UNSAFE
             if (A_StartSet_Size <= StartSetSizeLimit)
             {
                 char[] startchars = new List<char>(builder.solver.GenerateAllCharacters(A_startset)).ToArray();
                 A_StartSet_Vec = Array.ConvertAll(startchars, c => new Vector<ushort>(c));
                 A_StartSet_singleton = (ushort)startchars[0];
             }
-
-            this.A_StartSet_compiled = VectorizedIndexOf.CompileBooleanDecisionTree(this.A_StartSet);
+#endif
 
             if (this.A_prefix != string.Empty)
             {
@@ -783,6 +789,24 @@ namespace Microsoft.SRM
             }
         }
 
+        /// <summary>
+        /// Generate all matches.
+        /// <param name="input">input string</param>
+        /// <param name="limit">upper bound on the number of found matches, nonpositive value (default is 0) means no bound</param>
+        /// <param name="startat">the position to start search in the input string</param>
+        /// <param name="endat">end position in the input, negative value means unspecified and taken to be input.Length-1</param>
+        /// </summary>
+        public List<Match> Matches(string input, int limit = 0, int startat = 0, int endat = -1)
+        {
+#if UNSAFE
+            if ((Options & RegexOptions.Vectorize) != RegexOptions.None)
+            {
+                return Matches_(input, limit, startat, endat);
+            }
+#endif
+            return MatchesSafe(input, limit, startat, endat);
+        }
+
         #region safe version of Matches and IsMatch for string input
 
         /// <summary>
@@ -792,7 +816,7 @@ namespace Microsoft.SRM
         /// <param name="startat">the position to start search in the input string</param>
         /// <param name="endat">end position in the input, negative value means unspecified and taken to be input.Length-1</param>
         /// </summary>
-        public List<Match> Matches(string input, int limit = 0, int startat = 0, int endat = -1)
+        public List<Match> MatchesSafe(string input, int limit = 0, int startat = 0, int endat = -1)
         {
             if (A.isNullable)
                 throw new AutomataException(AutomataExceptionKind.MustNotAcceptEmptyString);
@@ -1556,17 +1580,13 @@ namespace Microsoft.SRM
             {
                 if (q == q0_A1)
                 {
-                    if (this.A_StartSet_Vec == null)
-                    {
-                        i = IndexOfStartset_(inputp, k, i);
-                    }
-                    else if (A_StartSet_Vec.Length == 1)
+                    if (this.A_StartSet_Vec != null && A_StartSet_Vec.Length == 1)
                     {
                         i = VectorizedIndexOf.UnsafeIndexOf1(inputp, k, i, this.A_StartSet_singleton, A_StartSet_Vec[0]);
                     }
                     else
                     {
-                        i = VectorizedIndexOf.UnsafeIndexOf(inputp, k, i, this.A_StartSet, A_StartSet_compiled);
+                        i = IndexOfStartset_(inputp, k, i);
                     }
 
                     if (i == -1)
@@ -2025,30 +2045,6 @@ namespace Microsoft.SRM
         }
 
         /// <summary>
-        ///  Find first occurrence of startset element in input starting from index i.
-        /// </summary>
-        /// <param name="input">input string to search in</param>
-        /// <param name="k">length of the input</param>
-        /// <param name="i">the start index in input to search from</param>
-        /// <returns></returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        unsafe int IndexOfStartset_(char* input, int k, int i)
-        {
-            while (i < k)
-            {
-                var input_i = input[i];
-                if (input_i < A_StartSet.precomputed.Length ? A_StartSet.precomputed[input_i] : A_StartSet.bst.Find(input_i) == 1)
-                    break;
-                else
-                    i += 1;
-            }
-            if (i == k)
-                return -1;
-            else
-                return i;
-        }
-
-        /// <summary>
         ///  Find first occurrence of value in input starting from index i.
         /// </summary>
         /// <param name="input">input array to search in</param>
@@ -2091,6 +2087,31 @@ namespace Microsoft.SRM
             return (i == k ? -1 : i);
         }
 
+#if UNSAFE
+        /// <summary>
+        ///  Find first occurrence of startset element in input starting from index i.
+        /// </summary>
+        /// <param name="input">input string to search in</param>
+        /// <param name="k">length of the input</param>
+        /// <param name="i">the start index in input to search from</param>
+        /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        unsafe int IndexOfStartset_(char* input, int k, int i)
+        {
+            while (i < k)
+            {
+                var input_i = input[i];
+                if (input_i < A_StartSet.precomputed.Length ? A_StartSet.precomputed[input_i] : A_StartSet.bst.Find(input_i) == 1)
+                    break;
+                else
+                    i += 1;
+            }
+            if (i == k)
+                return -1;
+            else
+                return i;
+        }
+
         /// <summary>
         ///  Find first occurrence of s in input starting from index i.
         ///  This method is called when A has nonemmpty prefix and ingorecase is false
@@ -2124,6 +2145,7 @@ namespace Microsoft.SRM
             }
             return -1;
         }
+#endif
 
         #endregion
 
