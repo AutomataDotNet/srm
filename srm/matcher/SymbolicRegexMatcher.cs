@@ -799,10 +799,12 @@ namespace Microsoft.SRM
         public List<Match> Matches(string input, int limit = 0, int startat = 0, int endat = -1)
         {
 #if UNSAFE
-            return Matches_(input, limit, startat, endat);
-#else
-            return MatchesSafe(input, limit, startat, endat);
+            if ((Options & RegexOptions.Vectorize) != RegexOptions.None)
+            {
+                return Matches_(input, limit, startat, endat);
+            }
 #endif
+            return MatchesSafe(input, limit, startat, endat);
         }
 
         #region safe version of Matches and IsMatch for string input
