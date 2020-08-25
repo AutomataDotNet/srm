@@ -1,7 +1,7 @@
 trigger: none
 
 variables:
-  ReleaseVersion: '1.0.1'
+  ReleaseVersion: '1.1.0'
 
 pool:
   vmImage: "windows-latest"
