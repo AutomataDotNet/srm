@@ -135,12 +135,6 @@ namespace Microsoft.SRM
         /// </summary>
         [NonSerialized]
         ushort A_StartSet_singleton;
-
-        /// <summary>
-        /// A vectorized decision stree evaluator generated and compiled from  A_StartSet. 
-        /// </summary>
-        [NonSerialized]
-        internal Func<Vector<ushort>, Vector<ushort>> A_StartSet_compiled;
 #endif
 
         /// <summary>
@@ -590,11 +584,6 @@ namespace Microsoft.SRM
                 A_StartSet_Vec = Array.ConvertAll(startchars, c => new Vector<ushort>(c));
                 A_StartSet_singleton = (ushort)startchars[0];
             }
-
-            if (!(Options & RegexOptions.UncompiledVectorization))
-            {
-                this.A_StartSet_compiled = VectorizedIndexOf.CompileBooleanDecisionTree(this.A_StartSet);
-            }
 #endif
 
             if (this.A_prefix != string.Empty)
@@ -800,6 +789,22 @@ namespace Microsoft.SRM
             }
         }
 
+        /// <summary>
+        /// Generate all matches.
+        /// <param name="input">input string</param>
+        /// <param name="limit">upper bound on the number of found matches, nonpositive value (default is 0) means no bound</param>
+        /// <param name="startat">the position to start search in the input string</param>
+        /// <param name="endat">end position in the input, negative value means unspecified and taken to be input.Length-1</param>
+        /// </summary>
+        public List<Match> Matches(string input, int limit = 0, int startat = 0, int endat = -1)
+        {
+#if UNSAFE
+            return Matches_(input, limit, startat, endat);
+#else
+            return MatchesSafe(input, limit, startat, endat);
+#endif
+        }
+
         #region safe version of Matches and IsMatch for string input
 
         /// <summary>
@@ -809,7 +814,7 @@ namespace Microsoft.SRM
         /// <param name="startat">the position to start search in the input string</param>
         /// <param name="endat">end position in the input, negative value means unspecified and taken to be input.Length-1</param>
         /// </summary>
-        public List<Match> Matches(string input, int limit = 0, int startat = 0, int endat = -1)
+        public List<Match> MatchesSafe(string input, int limit = 0, int startat = 0, int endat = -1)
         {
             if (A.isNullable)
                 throw new AutomataException(AutomataExceptionKind.MustNotAcceptEmptyString);
@@ -1576,10 +1581,6 @@ namespace Microsoft.SRM
                     if (this.A_StartSet_Vec != null && A_StartSet_Vec.Length == 1)
                     {
                         i = VectorizedIndexOf.UnsafeIndexOf1(inputp, k, i, this.A_StartSet_singleton, A_StartSet_Vec[0]);
-                    }
-                    else if (A_StartSet_compiled != null)
-                    {
-                        i = VectorizedIndexOf.UnsafeIndexOf(inputp, k, i, this.A_StartSet, A_StartSet_compiled);
                     }
                     else
                     {

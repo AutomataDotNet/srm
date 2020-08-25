@@ -152,18 +152,18 @@ namespace Microsoft.SRM.Tests
         }
 
         [TestMethod]
-        public void UncompiledVectorization()
+        public void Vectorize()
         {
-            var pattern = @"\w"; // This will trigger the binary tree based start set search
-            var r = new System.Text.RegularExpressions.Regex(pattern, RegexOptions.Singleline);
-            var sr1 = new Regex(pattern, RegexOptions.Singleline);
-            var sr2 = new Regex(pattern, RegexOptions.Singleline | RegexOptions.UncompiledVectorization);
-            var input1 = "a";
-            AssertIsMatchesAgree(r, sr1, input1, true);
-            AssertIsMatchesAgree(r, sr2, input1, true);
-            var input2 = "&";
-            AssertIsMatchesAgree(r, sr1, input2, false);
-            AssertIsMatchesAgree(r, sr2, input2, false);
+            var pattern = @"^\w\d\w{1,8}$";
+            var r = new System.Text.RegularExpressions.Regex(pattern);
+            var sr = new Regex(pattern, RegexOptions.Vectorize);
+            AssertIsMatchesAgree(r, sr, "a0d", true);
+            AssertIsMatchesAgree(r, sr, "a0", false);
+            AssertIsMatchesAgree(r, sr, "a5def", true);
+            AssertIsMatchesAgree(r, sr, "aa", false);
+            AssertIsMatchesAgree(r, sr, "a3abcdefg", true);
+            AssertIsMatchesAgree(r, sr, "a3abcdefgh", true);
+            AssertIsMatchesAgree(r, sr, "a3abcdefghi", false);
         }
     }
 }

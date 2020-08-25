@@ -16,7 +16,7 @@ namespace Microsoft.SRM
         public static RegexOptions ECMAScript = new RegexOptions(32);
 
         // SRM specific options
-        public static RegexOptions UncompiledVectorization = new RegexOptions(1024);
+        public static RegexOptions Vectorize = new RegexOptions(1024);
 
         private int value;
 
@@ -70,7 +70,7 @@ namespace Microsoft.SRM
             handleEquivalentOption(IgnorePatternWhitespace, System.Text.RegularExpressions.RegexOptions.IgnorePatternWhitespace);
             handleEquivalentOption(CultureInvariant, System.Text.RegularExpressions.RegexOptions.CultureInvariant);
             handleEquivalentOption(ECMAScript, System.Text.RegularExpressions.RegexOptions.ECMAScript);
-            ignoreOption(UncompiledVectorization);
+            ignoreOption(Vectorize);
             Debug.Assert(handledOptions == ourOptions);
             return theirOptions;
         }
