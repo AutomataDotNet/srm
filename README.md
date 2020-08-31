@@ -10,7 +10,7 @@ SRM combines advanced symbolic reasoning with a regex derivatives based matching
 The API mostly follows that of `System.Text.RegularExpressions`:
 
 ```
-using Microsoft.Automata;
+using Microsoft.SRM;
 ...
 string input = "Hello World!";
 var regex = new Regex(".l*.");
