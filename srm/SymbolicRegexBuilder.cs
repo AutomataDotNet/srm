@@ -671,9 +671,12 @@ namespace Microsoft.SRM
                 }
         }
 
-        internal SymbolicRegexNode<S> MkDerivative_StartOfLine(SymbolicRegexNode<S> sr)
+        internal SymbolicRegexNode<S> MkDerivativeForBorder(BorderSymbol borderSymbol, SymbolicRegexNode<S> sr)
         {
-            if (sr.IsStartOfLineAnchor)
+            if ((sr.IsSartAnchor && borderSymbol == BorderSymbol.Start) ||
+                (sr.IsEndAnchor && borderSymbol == BorderSymbol.End) ||
+                (sr.IsStartOfLineAnchor && (borderSymbol == BorderSymbol.StartLine || borderSymbol == BorderSymbol.Start)) ||
+                (sr.IsEndOfLineAnchor && (borderSymbol == BorderSymbol.EndLine || borderSymbol == BorderSymbol.End)))
             {
                 return this.epsilon;
             }
@@ -692,7 +695,7 @@ namespace Microsoft.SRM
                     case SymbolicRegexKind.Concat:
                         {
                             #region d(a, AB) = d(a,A)B | (if A nullable then d(a,B))
-                            var deriv = this.MkDerivative_StartOfLine(sr.left);
+                            var deriv = this.MkDerivativeForBorder(borderSymbol, sr.left);
                             if (deriv == sr.left && !deriv.isNullable)
                             {
                                 return sr;
@@ -702,7 +705,7 @@ namespace Microsoft.SRM
                                 var first = this.MkConcat(deriv, sr.right);
                                 if (sr.left.IsNullable)
                                 {
-                                    var second = this.MkDerivative_StartOfLine(sr.right);
+                                    var second = this.MkDerivativeForBorder(borderSymbol, sr.right);
                                     var or = this.MkOr2(first, second);
                                     return or;
                                 }
@@ -717,7 +720,7 @@ namespace Microsoft.SRM
                         {
                             //TBD:...
                             #region d(a, R*) = d(a,R)R*
-                            var step = MkDerivative_StartOfLine(sr.left);
+                            var step = MkDerivativeForBorder(borderSymbol, sr.left);
                             if (step == sr.left)
                             {
                                 return sr;
@@ -742,35 +745,35 @@ namespace Microsoft.SRM
                     case SymbolicRegexKind.Or:
                         {
                             #region d(a,A|B) = d(a,A)|d(a,B)
-                            var alts_deriv = sr.alts.MkDerivative_StartOfLine();
+                            var alts_deriv = sr.alts.MkDerivativesForBorder(borderSymbol);
                             return this.MkOr(alts_deriv);
                             #endregion
                         }
                     case SymbolicRegexKind.And:
                         {
                             #region d(a,A & B) = d(a,A) & d(a,B)
-                            var derivs = sr.alts.MkDerivative_StartOfLine();
+                            var derivs = sr.alts.MkDerivativesForBorder(borderSymbol);
                             return this.MkAnd(derivs);
                             #endregion
                         }
                     default: //ITE 
                         {
                             #region d(a,Ite(A,B,C)) = Ite(d(a,A),d(a,B),d(a,C))
-                            var condD = this.MkDerivative_StartOfLine(sr.iteCond);
+                            var condD = this.MkDerivativeForBorder(borderSymbol, sr.iteCond);
                             if (condD == this.nothing)
                             {
-                                var rightD = this.MkDerivative_StartOfLine(sr.right);
+                                var rightD = this.MkDerivativeForBorder(borderSymbol, sr.right);
                                 return rightD;
                             }
                             else if (condD == this.dotStar)
                             {
-                                var leftD = this.MkDerivative_StartOfLine(sr.left);
+                                var leftD = this.MkDerivativeForBorder(borderSymbol, sr.left);
                                 return leftD;
                             }
                             else
                             {
-                                var leftD = this.MkDerivative_StartOfLine(sr.left);
-                                var rightD = this.MkDerivative_StartOfLine(sr.right);
+                                var leftD = this.MkDerivativeForBorder(borderSymbol, sr.left);
+                                var rightD = this.MkDerivativeForBorder(borderSymbol, sr.right);
                                 var ite = this.MkIfThenElse(condD, leftD, rightD);
                                 return ite;
                             }
