@@ -331,6 +331,13 @@ namespace Microsoft.SRM
         [NonSerialized]
         int[] delta;
 
+        /// <summary>
+        /// Lookup table for border-symbol transitions
+        /// [startline,endline,start,end]
+        /// </summary>
+        [NonSerialized]
+        Dictionary<int, int[]> deltaForBorderSymbols = new Dictionary<int, int[]>();
+
         #region custom serialization
 
         [NonSerialized]
@@ -666,6 +673,8 @@ namespace Microsoft.SRM
         /// Compute the target state for source state q and input character c.
         /// All uses of Delta must be inlined for efficiency. 
         /// This is the purpose of the MethodImpl(MethodImplOptions.AggressiveInlining) attribute.
+        /// Input character -1 is start-line symbol. 
+        /// Input character -2 is end-line symbol.
         /// </summary>
         /// <param name="c">input character</param>
         /// <param name="q">state id of source regex</param>
@@ -676,37 +685,55 @@ namespace Microsoft.SRM
         {
             int p;
             #region copy&paste region of the definition of Delta being inlined
-            int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
-            S atom = atoms[atom_id];
-            if (q < StateLimit)
+            if (c >= 0)
             {
-                #region use delta
-                int offset = (q * K) + atom_id;
-                p = delta[offset];
-                if (p == 0)
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
                 {
-                    CreateNewTransition(q, atom, offset, out p, out regex);
+                    #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
                 }
                 else
                 {
-                    regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
                 }
-                #endregion
             }
             else
             {
-                #region use deltaExtra
-                int[] q_trans = deltaExtra[q];
-                p = q_trans[atom_id];
-                if (p == 0)
+                BorderSymbol borderSymbol = (BorderSymbol)c;
+                int borderSymbolId = c + (int)BorderSymbol.Count;
+                int[] targets;
+                if (deltaForBorderSymbols.TryGetValue(q, out targets) && targets[borderSymbolId] > 0)
                 {
-                    CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    p = targets[borderSymbolId];
+                    regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
                 }
                 else
                 {
-                    regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    CreateNewTransitionForBorderSymbol(q, borderSymbol, out p, out regex);
                 }
-                #endregion
             }
             #endregion
             return p;
@@ -784,6 +811,56 @@ namespace Microsoft.SRM
                             deltaExtra[p] = new int[K];
                     }
                     delta[offset] = p;
+                    regex = deriv;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Critical region for threadsafe applications for defining a new transition for border anchors
+        /// </summary>
+        //[MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void CreateNewTransitionForBorderSymbol(int q, BorderSymbol borderSymbol, out int p, out SymbolicRegexNode<S> regex)
+        {
+            lock (this)
+            {
+                //check if meanwhile the transition has become possibly defined by another thread
+                int borderSymbolId = borderSymbol - BorderSymbol.Count;
+                int[] targets;
+                if (!deltaForBorderSymbols.TryGetValue(q, out targets))
+                {
+                    // initialize the array of target states for border symbols
+                    targets = new int[(int)BorderSymbol.Count];
+                    deltaForBorderSymbols[q] = targets;
+                }
+                if (targets[borderSymbolId] > 0)
+                {
+                    p = targets[borderSymbolId];
+                    #region find the regex for p
+                    if (p < StateLimit)
+                        regex = state2regex[p];
+                    else
+                        regex = state2regexExtra[p];
+                    #endregion
+                }
+                else
+                {
+                    #region compute the derivative
+                    var q_regex = (q < StateLimit ? state2regex[q] : state2regexExtra[q]);
+                    var deriv = q_regex.MkDerivativeForBorder(borderSymbol);
+                    if (!regex2state.TryGetValue(deriv, out p))
+                    {
+                        p = nextStateId++;
+                        regex2state[deriv] = p;
+                        if (p < StateLimit)
+                            state2regex[p] = deriv;
+                        else
+                            state2regexExtra[p] = deriv;
+                        if (p >= StateLimit)
+                            deltaExtra[p] = new int[K];
+                    }
+                    #endregion
+                    targets[borderSymbolId] = p;
                     regex = deriv;
                 }
             }
@@ -971,6 +1048,9 @@ namespace Microsoft.SRM
                     int c = input[i];
                     int p;
 
+                    if (c == '\n')
+                        q = Delta((int)BorderSymbol.EndLine, q, out regex);
+
 #if INLINE
                     #region copy&paste region of the definition of Delta being inlined
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
@@ -1009,6 +1089,9 @@ namespace Microsoft.SRM
 #else
                     p = Delta(c, q, out regex);
 #endif
+
+                    if (c == '\n')
+                        p = Delta((int)BorderSymbol.StartLine, p, out regex);
 
                     if (regex == this.builder.dotStar)
                     {
@@ -1727,6 +1810,11 @@ namespace Microsoft.SRM
 
                     //TBD: anchors
                     int c = inputp[i];
+                    // a newline character is surrounded by 0-width end-line and start-line characters
+                    if (c == '\n')
+                    {
+
+                    }
                     int p;
 
 #if INLINE

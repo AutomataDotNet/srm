@@ -25,6 +25,15 @@ namespace Microsoft.SRM
         //Sequence = 9
     }
 
+    public enum BorderSymbol
+    {
+        StartLine = -4,
+        EndLine = -3,
+        Start = -2,
+        End = -1,
+        Count = 4
+    }
+
     /// <summary>
     /// Represents an AST node of a symbolic regex.
     /// </summary>
@@ -879,6 +888,17 @@ namespace Microsoft.SRM
         public SymbolicRegexNode<S> MkDerivative(S elem)
         {
             return builder.MkDerivative(elem, this);
+        }
+
+        /// <summary>
+        /// Takes the derivative of the symbolic regex wrt an invisible border symbol.
+        /// The symbol is ignored by any regex except a respective anchor.
+        /// </summary>
+        /// <param name="isStartLine">if true then start-line else end-line</param>
+        /// <returns></returns>
+        public SymbolicRegexNode<S> MkDerivativeForBorder(BorderSymbol borderSymbol)
+        {
+            return builder.MkDerivativeForBorder(borderSymbol, this);
         }
 
         ///// <summary>
@@ -2197,12 +2217,12 @@ namespace Microsoft.SRM
                 return CreateConjunction(builder, MkDerivativesOfElems(elem));
         }
 
-        internal SymbolicRegexSet<S> MkDerivative_StartOfLine()
+        internal SymbolicRegexSet<S> MkDerivativesForBorder(BorderSymbol borderSymbol)
         {
             if (kind == SymbolicRegexSetKind.Disjunction)
-                return CreateDisjunction(builder, MkDerivatives_StartOfLine_OfElems());
+                return CreateDisjunction(builder, MkDerivativesForBorder_(borderSymbol));
             else
-                return CreateConjunction(builder, MkDerivatives_StartOfLine_OfElems());
+                return CreateConjunction(builder, MkDerivativesForBorder_(borderSymbol));
         }
 
         IEnumerable<SymbolicRegexNode<S>> MkDerivativesOfElems(S elem)
@@ -2211,10 +2231,10 @@ namespace Microsoft.SRM
                 yield return s.MkDerivative(elem);
         }
 
-        IEnumerable<SymbolicRegexNode<S>> MkDerivatives_StartOfLine_OfElems()  
+        IEnumerable<SymbolicRegexNode<S>> MkDerivativesForBorder_(BorderSymbol borderSymbol)  
         {
             foreach (var s in this)
-                yield return s.builder.MkDerivative_StartOfLine(s);
+                yield return s.builder.MkDerivativeForBorder(borderSymbol, s);
         }
 
         IEnumerable<SymbolicRegexNode<T>> TransformElems<T>(SymbolicRegexBuilder<T> builderT, Func<S, T> predicateTransformer)
