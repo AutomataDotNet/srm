@@ -614,18 +614,21 @@ namespace Microsoft.SRM
             }
             else
             {
-                char c = input[0];
-                q = Delta(c, q, out regex);
+                //start with the start symbol
+                q = DeltaBorder(BorderSymbol.Start, q, out regex);
 
-
-                for (int i = 1; i < input.Length; i++)
+                for (int i = 0; i < input.Length; i++)
                 {
-                    c = input[i];
+                    var c = input[i];
 
                     int p = 0;
 
 #if INLINE
-                    #region copy&paste region of the definition of Delta being inlined
+                    #region cut-n-paste Delta for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    #region core
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
                 S atom = atoms[atom_id];
                 if (q < StateLimit)
@@ -658,6 +661,46 @@ namespace Microsoft.SRM
                     }
                     #endregion
                 }
+                    #endregion
+                p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+            }
+            else
+            {
+                    #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                    #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                else
+                {
+                    #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                    #endregion
+            }
                     #endregion
 #else
                     p = Delta(c, q, out regex);
@@ -673,8 +716,6 @@ namespace Microsoft.SRM
         /// Compute the target state for source state q and input character c.
         /// All uses of Delta must be inlined for efficiency. 
         /// This is the purpose of the MethodImpl(MethodImplOptions.AggressiveInlining) attribute.
-        /// Input character -1 is start-line symbol. 
-        /// Input character -2 is end-line symbol.
         /// </summary>
         /// <param name="c">input character</param>
         /// <param name="q">state id of source regex</param>
@@ -684,9 +725,11 @@ namespace Microsoft.SRM
         int Delta(int c, int q, out SymbolicRegexNode<S> regex)
         {
             int p;
-            #region copy&paste region of the definition of Delta being inlined
-            if (c >= 0)
+            #region cut-n-paste Delta for explicit inlining
+            if (c == (int)'\n')
             {
+                q = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                #region core
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
                 S atom = atoms[atom_id];
                 if (q < StateLimit)
@@ -719,23 +762,166 @@ namespace Microsoft.SRM
                     }
                     #endregion
                 }
+                #endregion
+                p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
             }
             else
             {
-                BorderSymbol borderSymbol = (BorderSymbol)c;
-                int borderSymbolId = c + (int)BorderSymbol.Count;
-                int[] targets;
-                if (deltaForBorderSymbols.TryGetValue(q, out targets) && targets[borderSymbolId] > 0)
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
                 {
-                    p = targets[borderSymbolId];
-                    regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
                 }
                 else
                 {
-                    CreateNewTransitionForBorderSymbol(q, borderSymbol, out p, out regex);
+                    #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
                 }
+                #endregion
             }
             #endregion
+            return p;
+        }
+
+        /// <summary>
+        /// Compute the target state for source state q and input character c, computing in reverse: StartLine and EndLine are reversed.
+        /// All uses of DeltaRev must be inlined for efficiency. 
+        /// This is the purpose of the MethodImpl(MethodImplOptions.AggressiveInlining) attribute.
+        /// </summary>
+        /// <param name="c">input character</param>
+        /// <param name="q">state id of source regex</param>
+        /// <param name="regex">target regex</param>
+        /// <returns>state id of target regex</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        int DeltaRev(int c, int q, out SymbolicRegexNode<S> regex)
+        {
+            int p;
+            #region cut-n-paste DeltaRev for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                    #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                else
+                {
+                    #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                #endregion
+                p = DeltaBorder(BorderSymbol.EndLine, p, out regex);
+            }
+            else
+            {
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                    #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                else
+                {
+                    #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                #endregion
+            }
+            #endregion
+            return p;
+        }
+
+        /// <summary>
+        /// Compute the target state for source state q and borderSymbol.
+        /// </summary>
+        /// <param name="borderSymbol">input border symbol</param>
+        /// <param name="q">state id of source regex</param>
+        /// <param name="regex">target regex</param>
+        /// <returns>state id of target regex</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        int DeltaBorder(BorderSymbol borderSymbol, int q, out SymbolicRegexNode<S> regex)
+        {
+            int p;
+            int borderSymbolId = (int)borderSymbol;
+            int[] targets;
+            if (deltaForBorderSymbols.TryGetValue(q, out targets) && targets[borderSymbolId] > 0)
+            {
+                p = targets[borderSymbolId];
+                regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+            }
+            else
+            {
+                CreateNewTransitionForBorderSymbol(q, borderSymbol, out p, out regex);
+            }
             return p;
         }
 
@@ -825,7 +1011,7 @@ namespace Microsoft.SRM
             lock (this)
             {
                 //check if meanwhile the transition has become possibly defined by another thread
-                int borderSymbolId = borderSymbol - BorderSymbol.Count;
+                int borderSymbolId = (int)borderSymbol;
                 int[] targets;
                 if (!deltaForBorderSymbols.TryGetValue(q, out targets))
                 {
@@ -1048,11 +1234,12 @@ namespace Microsoft.SRM
                     int c = input[i];
                     int p;
 
-                    if (c == '\n')
-                        q = Delta((int)BorderSymbol.EndLine, q, out regex);
-
 #if INLINE
-                    #region copy&paste region of the definition of Delta being inlined
+                    #region cut-n-paste Delta for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    #region core
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
                 S atom = atoms[atom_id];
                 if (q < StateLimit)
@@ -1086,12 +1273,49 @@ namespace Microsoft.SRM
                     #endregion
                 }
                     #endregion
+                p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+            }
+            else
+            {
+                    #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                    #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                else
+                {
+                    #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                    #endregion
+            }
+                    #endregion
 #else
                     p = Delta(c, q, out regex);
 #endif
-
-                    if (c == '\n')
-                        p = Delta((int)BorderSymbol.StartLine, p, out regex);
 
                     if (regex == this.builder.dotStar)
                     {
@@ -1160,7 +1384,11 @@ namespace Microsoft.SRM
                 //TBD: anchors
 
 #if INLINE
-                #region copy&paste region of the definition of Delta being inlined
+                #region cut-n-paste Delta for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                #region core
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
                 S atom = atoms[atom_id];
                 if (q < StateLimit)
@@ -1193,6 +1421,46 @@ namespace Microsoft.SRM
                     }
                 #endregion
                 }
+                #endregion
+                p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+            }
+            else
+            {
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                else
+                {
+                #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                #endregion
+            }
                 #endregion
 #else
                 p = Delta(c, q, out regex);
@@ -1265,7 +1533,11 @@ namespace Microsoft.SRM
                 c = input[i];
 
 #if INLINE
-                #region copy&paste region of the definition of Delta being inlined
+                #region cut-n-paste DeltaRev for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                #region core
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
                 S atom = atoms[atom_id];
                 if (q < StateLimit)
@@ -1299,8 +1571,48 @@ namespace Microsoft.SRM
                 #endregion
                 }
                 #endregion
+                p = DeltaBorder(BorderSymbol.EndLine, p, out regex);
+            }
+            else
+            {
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                else
+                {
+                #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                #endregion
+            }
+                #endregion
 #else
-                p = Delta(c, q, out regex);
+                p = DeltaRev(c, q, out regex);
 #endif
 
                 if (regex.isNullable)
@@ -1360,7 +1672,11 @@ namespace Microsoft.SRM
                 int p;
 
 #if INLINE
-                #region copy&paste region of the definition of Delta being inlined
+                #region cut-n-paste Delta for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                #region core
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
                 S atom = atoms[atom_id];
                 if (q < StateLimit)
@@ -1393,6 +1709,46 @@ namespace Microsoft.SRM
                     }
                 #endregion
                 }
+                #endregion
+                p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+            }
+            else
+            {
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                else
+                {
+                #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                #endregion
+            }
                 #endregion
 #else
                 p = Delta(c, q, out regex);
@@ -1492,15 +1848,12 @@ namespace Microsoft.SRM
                 int c = input[i];
                 int p;
 
-                #region if original regex contains anchors and c is \n then insert startline and endline characters
-                if (A.containsAnchors && c == '\n')
-                {
-                    //TBD: anchors
-                }
-                #endregion
-
 #if INLINE
-                #region copy&paste region of the definition of Delta being inlined
+                #region cut-n-paste Delta for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                #region core
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
                 S atom = atoms[atom_id];
                 if (q < StateLimit)
@@ -1533,6 +1886,46 @@ namespace Microsoft.SRM
                     }
                 #endregion
                 }
+                #endregion
+                p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+            }
+            else
+            {
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                else
+                {
+                #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                #endregion
+            }
                 #endregion
 #else
                 p = Delta(c, q, out regex);
@@ -1686,39 +2079,83 @@ namespace Microsoft.SRM
                 int p;
 
 #if INLINE
-                #region copy&paste region of the definition of Delta being inlined
-                    int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
-                    S atom = atoms[atom_id];
-                    if (q < StateLimit)
-                    {
+                #region cut-n-paste Delta for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
                 #region use delta
-                        int offset = (q * K) + atom_id;
-                        p = delta[offset];
-                        if (p == 0)
-                        {
-                            CreateNewTransition(q, atom, offset, out p, out regex);
-                        }
-                        else
-                        {
-                            regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                        }
-                #endregion
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
                     }
                     else
                     {
-                #region use deltaExtra
-                        int[] q_trans = deltaExtra[q];
-                        p = q_trans[atom_id];
-                        if (p == 0)
-                        {
-                            CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
-                        }
-                        else
-                        {
-                            regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                        }
-                #endregion
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
                     }
+                #endregion
+                }
+                else
+                {
+                #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                #endregion
+                p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+            }
+            else
+            {
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                else
+                {
+                #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                #endregion
+            }
                 #endregion
 #else
                 p = Delta(c, q, out regex);
@@ -1808,49 +2245,87 @@ namespace Microsoft.SRM
                     }
                     #endregion
 
-                    //TBD: anchors
                     int c = inputp[i];
-                    // a newline character is surrounded by 0-width end-line and start-line characters
-                    if (c == '\n')
-                    {
-
-                    }
                     int p;
 
 #if INLINE
-                    #region copy&paste region of the definition of Delta being inlined
-                    int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
-                    S atom = atoms[atom_id];
-                    if (q < StateLimit)
-                    {
+                    #region cut-n-paste Delta for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
                     #region use delta
-                        int offset = (q * K) + atom_id;
-                        p = delta[offset];
-                        if (p == 0)
-                        {
-                            CreateNewTransition(q, atom, offset, out p, out regex);
-                        }
-                        else
-                        {
-                            regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                        }
-                    #endregion
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
                     }
                     else
                     {
-                    #region use deltaExtra
-                        int[] q_trans = deltaExtra[q];
-                        p = q_trans[atom_id];
-                        if (p == 0)
-                        {
-                            CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
-                        }
-                        else
-                        {
-                            regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                        }
-                    #endregion
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
                     }
+                    #endregion
+                }
+                else
+                {
+                    #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                    #endregion
+                p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+            }
+            else
+            {
+                    #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                    #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                else
+                {
+                    #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                    #endregion
+                }
+                    #endregion
+            }
                     #endregion
 #else
                     p = Delta(c, q, out regex);
@@ -1922,7 +2397,11 @@ namespace Microsoft.SRM
                 c = input[i];
 
 #if INLINE
-                #region copy&paste region of the definition of Delta being inlined
+                #region cut-n-paste DeltaRev for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                #region core
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
                 S atom = atoms[atom_id];
                 if (q < StateLimit)
@@ -1956,8 +2435,48 @@ namespace Microsoft.SRM
                 #endregion
                 }
                 #endregion
+                p = DeltaBorder(BorderSymbol.EndLine, p, out regex);
+            }
+            else
+            {
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                else
+                {
+                #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                #endregion
+            }
+                #endregion
 #else
-                p = Delta(c, q, out regex);
+                p = DeltaRev(c, q, out regex);
 #endif
 
                 if (regex.isNullable)
@@ -2003,7 +2522,11 @@ namespace Microsoft.SRM
                 //TBD: anchors
 
 #if INLINE
-                #region copy&paste region of the definition of Delta being inlined
+                #region cut-n-paste Delta for explicit inlining
+            if (c == (int)'\n')
+            {
+                q = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                #region core
                 int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
                 S atom = atoms[atom_id];
                 if (q < StateLimit)
@@ -2036,6 +2559,46 @@ namespace Microsoft.SRM
                     }
                 #endregion
                 }
+                #endregion
+                p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+            }
+            else
+            {
+                #region core
+                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
+                S atom = atoms[atom_id];
+                if (q < StateLimit)
+                {
+                #region use delta
+                    int offset = (q * K) + atom_id;
+                    p = delta[offset];
+                    if (p == 0)
+                    {
+                        CreateNewTransition(q, atom, offset, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                else
+                {
+                #region use deltaExtra
+                    int[] q_trans = deltaExtra[q];
+                    p = q_trans[atom_id];
+                    if (p == 0)
+                    {
+                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
+                    }
+                    else
+                    {
+                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
+                    }
+                #endregion
+                }
+                #endregion
+            }
                 #endregion
 #else
                 p = Delta(c, q, out regex);
@@ -2344,47 +2907,8 @@ namespace Microsoft.SRM
 
                 int p;
 
-                //TBD: anchors
 
-#if INLINE
-                #region copy&paste region of the definition of Delta being inlined
-                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
-                S atom = atoms[atom_id];
-                if (q < StateLimit)
-                {
-                #region use delta
-                    int offset = (q * K) + atom_id;
-                    p = delta[offset];
-                    if (p == 0)
-                    {
-                        CreateNewTransition(q, atom, offset, out p, out regex);
-                    }
-                    else
-                    {
-                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                    }
-                #endregion
-                }
-                else
-                {
-                #region use deltaExtra
-                    int[] q_trans = deltaExtra[q];
-                    p = q_trans[atom_id];
-                    if (p == 0)
-                    {
-                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
-                    }
-                    else
-                    {
-                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                    }
-                #endregion
-                }
-                #endregion
-#else
                 p = Delta(c, q, out regex);
-#endif
-
 
                 if (regex.isNullable)
                 {
@@ -2524,7 +3048,7 @@ namespace Microsoft.SRM
                 }
                 #endregion
 #else
-                p = Delta(c, q, out regex);
+                p = DeltaRev(c, q, out regex);
 #endif
 
                 if (regex.isNullable)
@@ -2683,47 +3207,10 @@ namespace Microsoft.SRM
                 #endregion
 
 
-                //TBD: anchors
                 int p;
 
-#if INLINE
-                #region copy&paste region of the definition of Delta being inlined
-                int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
-                S atom = atoms[atom_id];
-                if (q < StateLimit)
-                {
-                #region use delta
-                    int offset = (q * K) + atom_id;
-                    p = delta[offset];
-                    if (p == 0)
-                    {
-                        CreateNewTransition(q, atom, offset, out p, out regex);
-                    }
-                    else
-                    {
-                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                    }
-                #endregion
-                }
-                else
-                {
-                #region use deltaExtra
-                    int[] q_trans = deltaExtra[q];
-                    p = q_trans[atom_id];
-                    if (p == 0)
-                    {
-                        CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
-                    }
-                    else
-                    {
-                        regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                    }
-                #endregion
-                }
-                #endregion
-#else
+
                 p = Delta(c, q, out regex);
-#endif
 
                 if (regex.isNullable)
                 {
