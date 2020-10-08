@@ -1196,38 +1196,42 @@ namespace Microsoft.SRM
             if (this.A.containsAnchors)
             {
                 #region original regex contains anchors
-                //TBD prefix optimization may still be important here 
-                //but the prefix needs to be computed based on A, but with start anchors removed or treated specially
-                if (A2 == null)
-                {
-                    #region initialize A2 to A.RemoveAnchors()
-                    this.A2 = A.ReplaceAnchors();
-                    int qA2;
-                    if (!regex2state.TryGetValue(this.A2, out qA2))
-                    {
-                        //the regex does not yet exist
-                        qA2 = this.nextStateId++;
-                        this.regex2state[this.A2] = qA2;
-                    }
-                    this.q0_A2 = qA2;
-                    if (qA2 >= this.StateLimit)
-                    {
-                        this.deltaExtra[qA2] = new int[this.K];
-                        this.state2regexExtra[qA2] = this.A2;
-                    }
-                    else
-                    {
-                        this.state2regex[qA2] = this.A2;
-                    }
 
+                ////TBD prefix optimization may still be important here 
+                ////but the prefix needs to be computed based on A, but with start anchors removed or treated specially
+                //if (A2 == null)
+                //{
+                //    #region initialize A2 to A.RemoveAnchors()
+                //    this.A2 = A.ReplaceAnchors();
+                //    int qA2;
+                //    if (!regex2state.TryGetValue(this.A2, out qA2))
+                //    {
+                //        //the regex does not yet exist
+                //        qA2 = this.nextStateId++;
+                //        this.regex2state[this.A2] = qA2;
+                //    }
+                //    this.q0_A2 = qA2;
+                //    if (qA2 >= this.StateLimit)
+                //    {
+                //        this.deltaExtra[qA2] = new int[this.K];
+                //        this.state2regexExtra[qA2] = this.A2;
+                //    }
+                //    else
+                //    {
+                //        this.state2regex[qA2] = this.A2;
+                //    }
+                //    #endregion
+                //}
+                //int q = this.q0_A2;
+                //SymbolicRegexNode<S> regex = this.A2;
 
-
-                    #endregion
-                }
-
-                int q = this.q0_A2;
-                SymbolicRegexNode<S> regex = this.A2;
+                //use A as A2
+                int q = this.q0_A;
+                SymbolicRegexNode<S> regex = this.A;
                 int i = startat;
+
+                if (i == 0)
+                    q = DeltaBorder(BorderSymbol.Start, q, out regex);
 
                 while (i < k)
                 {
