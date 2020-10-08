@@ -25,12 +25,15 @@ namespace Microsoft.SRM
         //Sequence = 9
     }
 
+    /// <summary>
+    /// Special purpose 0-width symbols that match corresponding anchors
+    /// </summary>
     public enum BorderSymbol
     {
-        StartLine = -4,
-        EndLine = -3,
-        Start = -2,
-        End = -1,
+        StartLine = 0,
+        EndLine = 1,
+        Start = 2,
+        End = 3,
         Count = 4
     }
 
