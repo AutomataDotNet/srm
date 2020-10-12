@@ -165,5 +165,37 @@ namespace Microsoft.SRM.Tests
             AssertIsMatchesAgree(r, sr, "a3abcdefgh", true);
             AssertIsMatchesAgree(r, sr, "a3abcdefghi", false);
         }
+
+        static Match M(int index, int length) { return new Match(index, length); }
+
+        [TestMethod]
+        public void TestStartAnchor()
+        {
+            string pat = "^a{2,4}";
+            var sr = new Regex(pat);
+            var r = new System.Text.RegularExpressions.Regex(pat);
+            var input = "aaaa\nab\naaa\nb\naabb";
+            var sr_expectedMatches = new Match[] { M(0, 4) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(1, r_matches.Count);
+            Assert.AreEqual<int>(1, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestStartLineAnchor()
+        {
+            string pat = "^a{2,4}";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.Multiline);
+            var input = "aaaa\nab\naaa\nb\naabb";
+            var sr_expectedMatches = new Match[] { M(0, 4), M(7, 3), M(13, 2) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(3, r_matches.Count);
+            Assert.AreEqual<int>(3, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
     }
 }

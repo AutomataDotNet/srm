@@ -616,8 +616,15 @@ namespace Microsoft.SRM
             return this.srBuilder.MkEndAnchor();
         }
 
+        public SymbolicRegexNode<S> MkBOLAnchor()
+        {
+            return this.srBuilder.MkBOLAnchor();
+        }
 
-
+        public SymbolicRegexNode<S> MkEOLAnchor()
+        {
+            return this.srBuilder.MkEOLAnchor();
+        }
         #endregion
     }
 }
