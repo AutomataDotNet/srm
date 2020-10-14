@@ -31,9 +31,9 @@ namespace Microsoft.SRM
     /// </summary>
     public enum BorderSymbol
     {
-        StartLine = 0,
-        EndLine = 1,
-        Start = 2,
+        BOL = 0,
+        EOL = 1,
+        Beg = 2,
         End = 3,
         Count = 4
     }
@@ -1113,7 +1113,7 @@ namespace Microsoft.SRM
                         if (IsDotStar)
                             return ".*";
                         else if (IsStar)
-                            return ToStringForLoop() + "*";
+                            return left.ToStringForLoop() + "*";
                         else if (IsBoundedLoop)
                             return left.ToStringForLoop() + "{" + lower + "," + upper + "}";
                         else

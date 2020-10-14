@@ -19,5 +19,10 @@ namespace Microsoft.SRM
         public override bool Equals(object obj) => obj is Match other && this == other;
 
         public override int GetHashCode() => (Index, Length).GetHashCode();
+
+        public override string ToString()
+        {
+            return string.Format("Match({0},{1})", Index, Length);
+        }
     }
 }

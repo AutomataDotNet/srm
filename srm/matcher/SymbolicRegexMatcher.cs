@@ -614,7 +614,7 @@ namespace Microsoft.SRM
             }
             else
             {
-                q = DeltaBorder(BorderSymbol.Start, q, out _);
+                q = DeltaBorder(BorderSymbol.Beg, q, out _);
 
                 for (int i = 0; i < input.Length; i++)
                 {
@@ -623,9 +623,9 @@ namespace Microsoft.SRM
                     int p;
                     if (c == 10)
                     {
-                        p = DeltaBorder(BorderSymbol.EndLine, q, out _);
+                        p = DeltaBorder(BorderSymbol.EOL, q, out _);
                         p = Delta(10, p, out _);
-                        p = DeltaBorder(BorderSymbol.StartLine, p, out _);
+                        p = DeltaBorder(BorderSymbol.BOL, p, out _);
                     }
                     else
                         p = Delta(c, q, out _);
@@ -1015,7 +1015,7 @@ namespace Microsoft.SRM
                 int i = startat;
 
                 if (i == 0)
-                    q = DeltaBorder(BorderSymbol.Start, q, out _);
+                    q = DeltaBorder(BorderSymbol.Beg, q, out _);
 
                 while (i < k)
                 {
@@ -1024,9 +1024,9 @@ namespace Microsoft.SRM
 
                     if (c == 10)
                     {
-                        p = DeltaBorder(BorderSymbol.EndLine, q, out _);
+                        p = DeltaBorder(BorderSymbol.EOL, q, out _);
                         p = Delta(10, p, out _);
-                        p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+                        p = DeltaBorder(BorderSymbol.BOL, p, out regex);
                     }
                     else
                         p = Delta(c, q, out regex);
@@ -1086,27 +1086,27 @@ namespace Microsoft.SRM
             int k = input.Length;
             int i_end = k;
             int q = q0_A;
+            SymbolicRegexNode<S> regex;
             if (i == 0)
                 // start of input
-                q = DeltaBorder(BorderSymbol.Start, q, out _);
+                q = DeltaBorder(BorderSymbol.Beg, q, out _);
             else if (input[i - 1] == '\n')
                 // start of a line
-                q = DeltaBorder(BorderSymbol.StartLine, q, out _);
+                q = DeltaBorder(BorderSymbol.BOL, q, out _);
             while (i < k)
             {
-                SymbolicRegexNode<S> regex;
                 int c = input[i];
                 int p;
 
                 if (c == 10)
                 {
-                    p = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
                     if (regex.IsNullable)
                         //nullable due to $ anchor
                         //end position is therefore the prior character if it exists
                         i_end = (i > 0 ? i - 1 : 0);
                     p = Delta(10, p, out regex);
-                    p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
                 }
                 else
                     p = Delta(c, q, out regex);
@@ -1125,6 +1125,14 @@ namespace Microsoft.SRM
                 }
                 q = p;
                 i += 1;
+            }
+            if (i == k)
+            {
+                DeltaBorder(BorderSymbol.End, q, out regex);
+                if (regex.IsNullable)
+                    //match occurred due to end anchor
+                    //this must be the case here
+                    i_end = k - 1;
             }
             if (i_end == k)
                 throw new AutomataException(AutomataExceptionKind.InternalError);
@@ -1173,7 +1181,7 @@ namespace Microsoft.SRM
                 q = DeltaBorder(BorderSymbol.End, q, out _);
             else if (i > 0 && input[i+1] == '\n')
                 // at the end of a line
-                q = DeltaBorder(BorderSymbol.EndLine, q, out _);
+                q = DeltaBorder(BorderSymbol.EOL, q, out _);
 
             while (i >= match_start_boundary)
             {
@@ -1185,11 +1193,11 @@ namespace Microsoft.SRM
                 if (c == 10)
                 {
                     //going backwards, first consume StartLine because reversal keeps the anchors in place
-                    p = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
                     if (regex.IsNullable)
                         last_start = i + 1;
                     p = Delta(10, p, out _);
-                    p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
                 }
                 else
                     p = Delta(c, q, out regex);
@@ -1213,7 +1221,7 @@ namespace Microsoft.SRM
                 {
                     //back at the start
                     //there must be a start anchor blocking nullability
-                    p = DeltaBorder(BorderSymbol.Start, p, out regex);
+                    p = DeltaBorder(BorderSymbol.Beg, p, out regex);
                     if (regex.isNullable)
                     {
                         last_start = 0;
@@ -1245,7 +1253,7 @@ namespace Microsoft.SRM
             // start with the start symbol in order to eliminate a pssible start anchor
             // q will remain the same if there is no start anchor
             if (i == 0)
-                q = DeltaBorder(BorderSymbol.Start, q, out regex);
+                q = DeltaBorder(BorderSymbol.Beg, q, out regex);
 
             while (i < k)
             {
@@ -1267,7 +1275,7 @@ namespace Microsoft.SRM
 
                 if (c == 10)
                 {
-                    p = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
                     if (regex.isNullable)
                     {
                         //match has been found due to endline anchor
@@ -1284,7 +1292,7 @@ namespace Microsoft.SRM
                         //but the newline character is used in the pattern
                         break;
                     }
-                    p = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
                     if (regex.isNullable)
                     {
                         //match has been found due to startline anchor
@@ -1321,6 +1329,13 @@ namespace Microsoft.SRM
                 //continue from the target state
                 q = p;
                 i += 1;
+            }
+            if (i == k)
+            {
+                q = DeltaBorder(BorderSymbol.End, q, out regex);
+                if (regex.IsNullable)
+                    //match occurred due to end anchor
+                    i = i - 1;
             }
             i_q0 = i_q0_A1;
             watchdog = (regex == null ? -1  : this.GetWatchdog(regex));
@@ -1390,6 +1405,10 @@ namespace Microsoft.SRM
                         {
                             i_q0 = i_q0_A1;
                             watchdog = -1;
+                            //check if there is an End anchor
+                            DeltaBorder(BorderSymbol.End, q, out regex);
+                            if (regex.IsNullable)
+                                return k - 1;
                             return k;
                         }
                     }
@@ -1403,7 +1422,7 @@ namespace Microsoft.SRM
                 #region compute one step but extended with line anchors if c = '\n'
                 if (c == 10)
                 {
-                    p = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
                     if (regex.isNullable)
                     {
                         //match has been found due to endline anchor
@@ -1420,7 +1439,7 @@ namespace Microsoft.SRM
                         //but the newline character is used in the pattern
                         break;
                     }
-                    p = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
                     if (regex.isNullable)
                     {
                         //match has been found due to startline anchor
@@ -1456,6 +1475,13 @@ namespace Microsoft.SRM
                 //continue from the target state
                 q = p;
                 i += 1;
+            }
+            if (i == k)
+            {
+                q = DeltaBorder(BorderSymbol.End, q, out regex);
+                if (regex.IsNullable)
+                    //match occurred due to end anchor
+                    i = i - 1;
             }
             i_q0 = i_q0_A1;
             watchdog = (regex == null ? -1 : this.GetWatchdog(regex));
@@ -1589,7 +1615,7 @@ namespace Microsoft.SRM
 
                 if (c == 10)
                 {
-                    p = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
                     if (regex.isNullable)
                     {
                         //match has been found due to endline anchor
@@ -1606,7 +1632,7 @@ namespace Microsoft.SRM
                         //but the newline character is used in the pattern
                         break;
                     }
-                    p = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
                     if (regex.isNullable)
                     {
                         //match has been found due to startline anchor
@@ -1715,7 +1741,7 @@ namespace Microsoft.SRM
 
                     if (c == 10)
                     {
-                        p = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                        p = DeltaBorder(BorderSymbol.EOL, q, out regex);
                         if (regex.isNullable)
                         {
                             //match has been found due to endline anchor
@@ -1732,7 +1758,7 @@ namespace Microsoft.SRM
                             //but the newline character is used in the pattern
                             break;
                         }
-                        p = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                        p = DeltaBorder(BorderSymbol.BOL, q, out regex);
                         if (regex.isNullable)
                         {
                             //match has been found due to startline anchor
@@ -1815,7 +1841,7 @@ namespace Microsoft.SRM
                 q = DeltaBorder(BorderSymbol.End, q, out _);
             else if (i > 0 && input[i + 1] == '\n')
                 // at the end of a line
-                q = DeltaBorder(BorderSymbol.EndLine, q, out _);
+                q = DeltaBorder(BorderSymbol.EOL, q, out _);
 
             while (i >= match_start_boundary)
             {
@@ -1828,11 +1854,11 @@ namespace Microsoft.SRM
                 if (c == 10)
                 {
                     //going backwards, first consume StartLine because reversal keeps the anchors in place
-                    p = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
                     if (regex.IsNullable)
                         last_start = i + 1;
                     p = Delta(10, p, out _);
-                    p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
                 }
                 else
                     p = Delta(c, q, out regex);
@@ -1871,28 +1897,28 @@ namespace Microsoft.SRM
         {
             int i_end = k;
             int q = q0_A;
+            SymbolicRegexNode<S> regex;
             if (i == 0)
                 // start of input
-                q = DeltaBorder(BorderSymbol.Start, q, out _);
+                q = DeltaBorder(BorderSymbol.Beg, q, out _);
             else if (input[i - 1] == '\n')
                 // start of a line
-                q = DeltaBorder(BorderSymbol.StartLine, q, out _);
+                q = DeltaBorder(BorderSymbol.BOL, q, out _);
 
             while (i < k)
             {
-                SymbolicRegexNode<S> regex;
                 int c = input[i];
                 int p;
 
                 if (c == 10)
                 {
-                    p = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
                     if (regex.IsNullable)
                         //nullable due to $ anchor
                         //end position is therefore the prior character if it exists
                         i_end = (i > 0 ? i - 1 : 0);
                     p = Delta(10, p, out regex);
-                    p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
                 }
                 else
                     p = Delta(c, q, out regex);
@@ -1912,6 +1938,14 @@ namespace Microsoft.SRM
                 }
                 q = p;
                 i += 1;
+            }
+            if (i == k)
+            {
+                DeltaBorder(BorderSymbol.End, q, out regex);
+                if (regex.IsNullable)
+                    //match occurred due to end anchor
+                    //this must be the case here
+                    i_end = k - 1;
             }
             if (i_end == k)
                 throw new AutomataException(AutomataExceptionKind.InternalError);
@@ -2160,17 +2194,16 @@ namespace Microsoft.SRM
             int q = q0_A;
             int step = 0;
             int codepoint = 0;
+            SymbolicRegexNode<S> regex;
             if (i == 0)
                 // start of input
-                q = DeltaBorder(BorderSymbol.Start, q, out _);
+                q = DeltaBorder(BorderSymbol.Beg, q, out _);
             else if (input[i - 1] == '\n')
                 // start of a line
-                q = DeltaBorder(BorderSymbol.StartLine, q, out _);
+                q = DeltaBorder(BorderSymbol.BOL, q, out _);
 
             while (i < k)
             {
-                SymbolicRegexNode<S> regex;
-
                 ushort c;
                 #region c = current UTF16 character
                 if (surrogate_codepoint == 0)
@@ -2210,13 +2243,13 @@ namespace Microsoft.SRM
 
                 if (c == 10)
                 {
-                    p = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
                     if (regex.IsNullable)
                         //nullable due to $ anchor
                         //end position is therefore the prior character if it exists
                         i_end = (i > 0 ? i - 1 : 0);
                     p = Delta(10, p, out _);
-                    p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
                 }
                 else
                     p = Delta(c, q, out regex);
@@ -2238,6 +2271,15 @@ namespace Microsoft.SRM
                     i += step;
                 else
                     i += 1;
+            }
+            if (i == k)
+            {
+                DeltaBorder(BorderSymbol.End, q, out regex);
+                if (regex.IsNullable)
+                    //match occurred due to end anchor
+                    //this must be the case here
+                    //TBD: adjust offset according to uft8 if nonascii
+                    i_end = k - 1;
             }
             if (i_end == k)
                 throw new AutomataException(AutomataExceptionKind.InternalError);
@@ -2290,7 +2332,7 @@ namespace Microsoft.SRM
                 q = DeltaBorder(BorderSymbol.End, q, out _);
             else if (i > 0 && input[i + 1] == '\n')
                 // at the end of a line
-                q = DeltaBorder(BorderSymbol.EndLine, q, out _);
+                q = DeltaBorder(BorderSymbol.EOL, q, out _);
 
             while (i >= match_start_boundary)
             {
@@ -2335,11 +2377,11 @@ namespace Microsoft.SRM
                 if (c == 10)
                 {
                     //going backwards, first consume StartLine because reversal keeps the anchors in place
-                    p = DeltaBorder(BorderSymbol.StartLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
                     if (regex.IsNullable)
                         last_start = i + 1;
                     p = Delta(10, p, out _);
-                    p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
                 }
                 else
                     p = Delta(c, q, out regex);
@@ -2505,11 +2547,11 @@ namespace Microsoft.SRM
 
                 if (c == 10)
                 {
-                    p = DeltaBorder(BorderSymbol.EndLine, q, out regex);
+                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
                     if (regex.IsNullable)
                         break;
                     p = Delta(10, p, out regex);
-                    p = DeltaBorder(BorderSymbol.StartLine, p, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
                 }
                 else
                     p = Delta(c, q, out regex);
