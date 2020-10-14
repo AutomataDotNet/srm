@@ -711,10 +711,10 @@ namespace Microsoft.SRM
 
         internal SymbolicRegexNode<S> MkDerivativeForBorder(BorderSymbol borderSymbol, SymbolicRegexNode<S> sr)
         {
-            if ((sr.IsStartAnchor && borderSymbol == BorderSymbol.Start) ||
+            if ((sr.IsStartAnchor && borderSymbol == BorderSymbol.Beg) ||
                 (sr.IsEndAnchor && borderSymbol == BorderSymbol.End) ||
-                (sr.IsBOLAnchor && (borderSymbol == BorderSymbol.StartLine || borderSymbol == BorderSymbol.Start)) ||
-                (sr.IsEOLAnchor && (borderSymbol == BorderSymbol.EndLine || borderSymbol == BorderSymbol.End)))
+                (sr.IsBOLAnchor && (borderSymbol == BorderSymbol.BOL || borderSymbol == BorderSymbol.Beg)) ||
+                (sr.IsEOLAnchor && (borderSymbol == BorderSymbol.EOL || borderSymbol == BorderSymbol.End)))
             {
                 return this.epsilon;
             }
