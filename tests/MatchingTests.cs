@@ -287,5 +287,20 @@ namespace Microsoft.SRM.Tests
             Assert.AreEqual<int>(3, sr_matches.Count);
             CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
         }
+
+        [TestMethod]
+        public void TestAllAnchors()
+        {
+            string pat = "\\Aabcd|abc\\z|^abc$";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.Multiline);
+            var input = "abcde\nabce\nabc\naabc\nab\nddabc";
+            var sr_expectedMatches = new Match[] { M(0, 4), M(11,3), M(25,3)};
+            var r_matches = r.Matches(input);
+            var sr_matches = sr.Matches(input).ToList();
+            Assert.AreEqual<int>(3, r_matches.Count);
+            Assert.AreEqual<int>(3, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
     }
 }
