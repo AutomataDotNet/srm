@@ -294,6 +294,16 @@ namespace Microsoft.SRM
             return this.endAnchor;
         }
 
+        public SymbolicRegexNode<S> MkBOLAnchor()
+        {
+            return this.bolAnchor;
+        }
+
+        public SymbolicRegexNode<S> MkEOLAnchor()
+        {
+            return this.eolAnchor;
+        }
+
         /// <summary>
         /// Make a singleton sequence regex
         /// </summary>
@@ -477,14 +487,7 @@ namespace Microsoft.SRM
                             }
                             else
                             {
-                                if (sr.IsStartOfLineAnchor)
-                                {
-                                    return this.newLine;
-                                }
-                                else
-                                {
-                                    return this.epsilon;
-                                }
+                                return this.epsilon;
                             }
                         }
                         else
@@ -502,21 +505,54 @@ namespace Microsoft.SRM
                             if (isBeg) //$ also at the beginning
                                 return this.dotStar;
                             else
-                            {
-                                if (sr.IsEndOfLineAnchor)
-                                {
-                                    return this.newLine;
-                                }
-                                else
-                                {
-                                    return this.epsilon;
-                                }
-                            }
+                                return this.epsilon;
                         }
                         else
                         {
                             //treat the anchor as regex that accepts nothing
                             return this.nothing;
+                        }
+                        #endregion
+                    }
+                case SymbolicRegexKind.BOLAnchor:
+                    {
+                        #region anchor ^ in multiline mode (does not handle all uses correctly for match generation)
+                        if (isBeg) //^ at the beginning
+                        {
+                            if (isEnd) //^ also at the end
+                            {
+                                return this.dotStar;
+                            }
+                            else
+                            {
+                                return MkOr(epsilon, MkConcat(dotStar, newLine));
+                            }
+                        }
+                        else
+                        {
+                            //treat the anchor as a regex that accepts newline
+                            return newLine;
+                        }
+                        #endregion
+                    }
+                case SymbolicRegexKind.EOLAnchor:
+                    {
+                        #region anchor $ in multiline mode (does not handle all uses correctly for match generation)
+                        if (isEnd) //^ at the end
+                        {
+                            if (isBeg) //^ also at the beginning
+                            {
+                                return this.dotStar;
+                            }
+                            else
+                            {
+                                return MkOr(epsilon, MkConcat(newLine, dotStar));
+                            }
+                        }
+                        else
+                        {
+                            //treat the anchor as a regex that accepts newline
+                            return newLine;
                         }
                         #endregion
                     }
@@ -559,6 +595,8 @@ namespace Microsoft.SRM
                 {
                     case SymbolicRegexKind.StartAnchor:
                     case SymbolicRegexKind.EndAnchor:
+                    case SymbolicRegexKind.BOLAnchor:
+                    case SymbolicRegexKind.EOLAnchor:
                     case SymbolicRegexKind.Epsilon:
                     case SymbolicRegexKind.WatchDog:
                         {
@@ -671,9 +709,12 @@ namespace Microsoft.SRM
                 }
         }
 
-        internal SymbolicRegexNode<S> MkDerivative_StartOfLine(SymbolicRegexNode<S> sr)
+        internal SymbolicRegexNode<S> MkDerivativeForBorder(BorderSymbol borderSymbol, SymbolicRegexNode<S> sr)
         {
-            if (sr.IsStartOfLineAnchor)
+            if ((sr.IsStartAnchor && borderSymbol == BorderSymbol.Beg) ||
+                (sr.IsEndAnchor && borderSymbol == BorderSymbol.End) ||
+                (sr.IsBOLAnchor && (borderSymbol == BorderSymbol.BOL || borderSymbol == BorderSymbol.Beg)) ||
+                (sr.IsEOLAnchor && (borderSymbol == BorderSymbol.EOL || borderSymbol == BorderSymbol.End)))
             {
                 return this.epsilon;
             }
@@ -692,7 +733,7 @@ namespace Microsoft.SRM
                     case SymbolicRegexKind.Concat:
                         {
                             #region d(a, AB) = d(a,A)B | (if A nullable then d(a,B))
-                            var deriv = this.MkDerivative_StartOfLine(sr.left);
+                            var deriv = this.MkDerivativeForBorder(borderSymbol, sr.left);
                             if (deriv == sr.left && !deriv.isNullable)
                             {
                                 return sr;
@@ -702,7 +743,7 @@ namespace Microsoft.SRM
                                 var first = this.MkConcat(deriv, sr.right);
                                 if (sr.left.IsNullable)
                                 {
-                                    var second = this.MkDerivative_StartOfLine(sr.right);
+                                    var second = this.MkDerivativeForBorder(borderSymbol, sr.right);
                                     var or = this.MkOr2(first, second);
                                     return or;
                                 }
@@ -717,7 +758,7 @@ namespace Microsoft.SRM
                         {
                             //TBD:...
                             #region d(a, R*) = d(a,R)R*
-                            var step = MkDerivative_StartOfLine(sr.left);
+                            var step = MkDerivativeForBorder(borderSymbol, sr.left);
                             if (step == sr.left)
                             {
                                 return sr;
@@ -742,35 +783,35 @@ namespace Microsoft.SRM
                     case SymbolicRegexKind.Or:
                         {
                             #region d(a,A|B) = d(a,A)|d(a,B)
-                            var alts_deriv = sr.alts.MkDerivative_StartOfLine();
+                            var alts_deriv = sr.alts.MkDerivativesForBorder(borderSymbol);
                             return this.MkOr(alts_deriv);
                             #endregion
                         }
                     case SymbolicRegexKind.And:
                         {
                             #region d(a,A & B) = d(a,A) & d(a,B)
-                            var derivs = sr.alts.MkDerivative_StartOfLine();
+                            var derivs = sr.alts.MkDerivativesForBorder(borderSymbol);
                             return this.MkAnd(derivs);
                             #endregion
                         }
                     default: //ITE 
                         {
                             #region d(a,Ite(A,B,C)) = Ite(d(a,A),d(a,B),d(a,C))
-                            var condD = this.MkDerivative_StartOfLine(sr.iteCond);
+                            var condD = this.MkDerivativeForBorder(borderSymbol, sr.iteCond);
                             if (condD == this.nothing)
                             {
-                                var rightD = this.MkDerivative_StartOfLine(sr.right);
+                                var rightD = this.MkDerivativeForBorder(borderSymbol, sr.right);
                                 return rightD;
                             }
                             else if (condD == this.dotStar)
                             {
-                                var leftD = this.MkDerivative_StartOfLine(sr.left);
+                                var leftD = this.MkDerivativeForBorder(borderSymbol, sr.left);
                                 return leftD;
                             }
                             else
                             {
-                                var leftD = this.MkDerivative_StartOfLine(sr.left);
-                                var rightD = this.MkDerivative_StartOfLine(sr.right);
+                                var leftD = this.MkDerivativeForBorder(borderSymbol, sr.left);
+                                var rightD = this.MkDerivativeForBorder(borderSymbol, sr.right);
                                 var ite = this.MkIfThenElse(condD, leftD, rightD);
                                 return ite;
                             }
@@ -786,6 +827,8 @@ namespace Microsoft.SRM
             {
                 case SymbolicRegexKind.StartAnchor:
                 case SymbolicRegexKind.EndAnchor:
+                case SymbolicRegexKind.BOLAnchor:
+                case SymbolicRegexKind.EOLAnchor:
                 case SymbolicRegexKind.Epsilon:
                 case SymbolicRegexKind.Singleton:
                 case SymbolicRegexKind.WatchDog:
@@ -990,6 +1033,10 @@ namespace Microsoft.SRM
                     return builderT.startAnchor;
                 case SymbolicRegexKind.EndAnchor:
                     return builderT.endAnchor;
+                case SymbolicRegexKind.BOLAnchor:
+                    return builderT.bolAnchor;
+                case SymbolicRegexKind.EOLAnchor:
+                    return builderT.eolAnchor;
                 case SymbolicRegexKind.WatchDog:
                     return builderT.MkWatchDog(sr.lower);
                 case SymbolicRegexKind.Epsilon:
@@ -1141,18 +1188,32 @@ namespace Microsoft.SRM
                         return ite;
                         #endregion
                     }
-                case '^':
+                case 'A':
                     {
                         #region start anchor
                         i_next = i + 1;
                         return this.startAnchor;
                         #endregion
                     }
-                case '$':
+                case 'z':
                     {
                         #region end anchor
                         i_next = i + 1;
                         return this.endAnchor;
+                        #endregion
+                    }
+                case '^':
+                    {
+                        #region beginning of line anchor
+                        i_next = i + 1;
+                        return this.bolAnchor;
+                        #endregion
+                    }
+                case '$':
+                    {
+                        #region end of line anchor
+                        i_next = i + 1;
+                        return this.eolAnchor;
                         #endregion
                     }
                 case '#':

@@ -22,7 +22,20 @@ namespace Microsoft.SRM
         IfThenElse = 7,
         And = 8,
         WatchDog = 9,
-        //Sequence = 9
+        BOLAnchor = 10,
+        EOLAnchor = 11,
+    }
+
+    /// <summary>
+    /// Special purpose 0-width symbols that match corresponding anchors
+    /// </summary>
+    public enum BorderSymbol
+    {
+        BOL = 0,
+        EOL = 1,
+        Beg = 2,
+        End = 3,
+        Count = 4
     }
 
     /// <summary>
@@ -130,10 +143,20 @@ namespace Microsoft.SRM
                         }
                     case SymbolicRegexKind.EndAnchor:
                         {
-                            sb.Append("$");
+                            sb.Append("z");
                             return;
                         }
                     case SymbolicRegexKind.StartAnchor:
+                        {
+                            sb.Append("A");
+                            return;
+                        }
+                    case SymbolicRegexKind.EOLAnchor:
+                        {
+                            sb.Append("$");
+                            return;
+                        }
+                    case SymbolicRegexKind.BOLAnchor:
                         {
                             sb.Append("^");
                             return;
@@ -392,7 +415,7 @@ namespace Microsoft.SRM
         /// <summary>
         /// Returns true iff this is a start-anchor
         /// </summary>
-        public bool IsSartAnchor
+        public bool IsStartAnchor
         {
             get { return this.kind == SymbolicRegexKind.StartAnchor; }
         }
@@ -400,9 +423,9 @@ namespace Microsoft.SRM
         /// <summary>
         /// Returns true iff this is an anchor for detecting start of line (including first line or start of input)
         /// </summary>
-        public bool IsStartOfLineAnchor
+        public bool IsBOLAnchor
         {
-            get { return this.lower == -2; }
+            get { return this.kind == SymbolicRegexKind.BOLAnchor; }
         }
 
         /// <summary>
@@ -416,17 +439,17 @@ namespace Microsoft.SRM
         /// <summary>
         /// Returns true iff this is an anchor for detecting end of line (including last line or end of input)
         /// </summary>
-        public bool IsEndOfLineAnchor
+        public bool IsEOLAnchor
         {
-            get { return this.upper == -2; }
+            get { return this.kind == SymbolicRegexKind.EOLAnchor; }
         }
 
         /// <summary>
-        /// Returns true iff this is either a start-anchor or an end-anchor
+        /// Returns true iff this is either a start-anchor or an end-anchor or EOLAnchor or BOLAnchor
         /// </summary>
         public bool IsAnchor
         {
-            get { return IsSartAnchor || IsEndAnchor; }
+            get { return IsStartAnchor || IsEndAnchor || IsBOLAnchor || IsEOLAnchor; }
         }
 
         /// <summary>
@@ -513,14 +536,14 @@ namespace Microsoft.SRM
 
         internal static SymbolicRegexNode<S> MkEolAnchor(SymbolicRegexBuilder<S> builder)
         {
-            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.EndAnchor, null, null, -1, -2, default(S), null, null);
+            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.EOLAnchor, null, null, -1, -1, default(S), null, null);
             anchor.containsAnchors = true;
             return anchor;
         }
 
         internal static SymbolicRegexNode<S> MkBolAnchor(SymbolicRegexBuilder<S> builder)
         {
-            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.StartAnchor, null, null, -2, -1, default(S), null, null);
+            var anchor = new SymbolicRegexNode<S>(builder, SymbolicRegexKind.BOLAnchor, null, null, -1, -1, default(S), null, null);
             anchor.containsAnchors = true;
             return anchor;
         }
@@ -729,6 +752,8 @@ namespace Microsoft.SRM
             {
                 case SymbolicRegexKind.StartAnchor:
                 case SymbolicRegexKind.EndAnchor:
+                case SymbolicRegexKind.BOLAnchor:
+                case SymbolicRegexKind.EOLAnchor:
                 case SymbolicRegexKind.Epsilon:
                 case SymbolicRegexKind.WatchDog:
                     return this;
@@ -881,6 +906,17 @@ namespace Microsoft.SRM
             return builder.MkDerivative(elem, this);
         }
 
+        /// <summary>
+        /// Takes the derivative of the symbolic regex wrt an invisible border symbol.
+        /// The symbol is ignored by any regex except a respective anchor.
+        /// </summary>
+        /// <param name="isStartLine">if true then start-line else end-line</param>
+        /// <returns></returns>
+        public SymbolicRegexNode<S> MkDerivativeForBorder(BorderSymbol borderSymbol)
+        {
+            return builder.MkDerivativeForBorder(borderSymbol, this);
+        }
+
         ///// <summary>
         ///// Temporary counter automaton exploration untility
         ///// </summary>
@@ -964,6 +1000,8 @@ namespace Microsoft.SRM
                 {
                     case SymbolicRegexKind.EndAnchor:
                     case SymbolicRegexKind.StartAnchor:
+                    case SymbolicRegexKind.BOLAnchor:
+                    case SymbolicRegexKind.EOLAnchor:
                     case SymbolicRegexKind.Epsilon:
                         hashcode = kind.GetHashCode();
                         break;
@@ -1030,6 +1068,70 @@ namespace Microsoft.SRM
             }
         }
 
+        string ToStringForLoop()
+        {
+            switch (kind)
+            {
+                case SymbolicRegexKind.Singleton:
+                    return ToString();
+                default:
+                    return "(" + ToString() + ")";
+            }
+        }
+
+        internal string ToStringForAlts()
+        {
+            switch (kind)
+            {
+                case SymbolicRegexKind.Concat:
+                case SymbolicRegexKind.Singleton:
+                case SymbolicRegexKind.Loop:
+                    return ToString();
+                default:
+                    return "(" + ToString() + ")";
+            }
+        }
+
+        public override string ToString()
+        {
+            switch (kind)
+            {
+                case SymbolicRegexKind.EndAnchor:
+                    return "\\z";
+                case SymbolicRegexKind.StartAnchor:
+                    return "\\A";
+                case SymbolicRegexKind.BOLAnchor:
+                    return "^";
+                case SymbolicRegexKind.EOLAnchor:
+                    return "$";
+                case SymbolicRegexKind.Epsilon:
+                    return "";
+                case SymbolicRegexKind.WatchDog:
+                    return "";
+                case SymbolicRegexKind.Loop:
+                    {
+                        if (IsDotStar)
+                            return ".*";
+                        else if (IsStar)
+                            return left.ToStringForLoop() + "*";
+                        else if (IsBoundedLoop)
+                            return left.ToStringForLoop() + "{" + lower + "," + upper + "}";
+                        else
+                            return left.ToStringForLoop() + "{" + lower + ",}";
+                    }
+                case SymbolicRegexKind.Or:
+                    return alts.ToString();
+                case SymbolicRegexKind.And:
+                    return alts.ToString();
+                case SymbolicRegexKind.Concat:
+                    return left.ToString() + right.ToString();
+                case SymbolicRegexKind.Singleton:
+                    return builder.solver.SerializePredicate(set);
+                default:
+                    return "(TBD:if-then-else)";
+            }
+        }
+
         /// <summary>
         /// Returns the set of all predicates that occur in the regex
         /// </summary>
@@ -1047,6 +1149,12 @@ namespace Microsoft.SRM
         {
             switch (kind)
             {
+                case SymbolicRegexKind.BOLAnchor:
+                case SymbolicRegexKind.EOLAnchor:
+                    {
+                        predicates.Add(builder.newLine.set);
+                        return;
+                    }
                 case SymbolicRegexKind.StartAnchor:
                 case SymbolicRegexKind.EndAnchor:
                 case SymbolicRegexKind.Epsilon:
@@ -1117,13 +1225,13 @@ namespace Microsoft.SRM
             {
                 case SymbolicRegexKind.Epsilon:
                 case SymbolicRegexKind.Singleton:
+                case SymbolicRegexKind.StartAnchor:
+                case SymbolicRegexKind.EndAnchor:
+                case SymbolicRegexKind.BOLAnchor:
+                case SymbolicRegexKind.EOLAnchor:
                     return this;
                 case SymbolicRegexKind.WatchDog:
                     return builder.epsilon;
-                case SymbolicRegexKind.StartAnchor:
-                    return builder.endAnchor;
-                case SymbolicRegexKind.EndAnchor:
-                    return builder.startAnchor;
                 case SymbolicRegexKind.Loop:
                     return builder.MkLoop(this.left.Reverse(), this.isLazyLoop, this.lower, this.upper);
                 case SymbolicRegexKind.Concat:
@@ -1161,6 +1269,8 @@ namespace Microsoft.SRM
             {
                 case SymbolicRegexKind.EndAnchor:
                 case SymbolicRegexKind.StartAnchor:
+                case SymbolicRegexKind.BOLAnchor:
+                case SymbolicRegexKind.EOLAnchor:
                 case SymbolicRegexKind.Singleton: 
                 case SymbolicRegexKind.WatchDog:
                 case SymbolicRegexKind.Epsilon:
@@ -1189,6 +1299,8 @@ namespace Microsoft.SRM
                     {
                         case SymbolicRegexKind.EndAnchor:
                         case SymbolicRegexKind.StartAnchor:
+                        case SymbolicRegexKind.EOLAnchor:
+                        case SymbolicRegexKind.BOLAnchor:
                         case SymbolicRegexKind.Singleton:
                         case SymbolicRegexKind.WatchDog:
                         case SymbolicRegexKind.Epsilon:
@@ -1233,6 +1345,8 @@ namespace Microsoft.SRM
             {
                 case SymbolicRegexKind.EndAnchor:
                 case SymbolicRegexKind.StartAnchor:
+                case SymbolicRegexKind.EOLAnchor:
+                case SymbolicRegexKind.BOLAnchor:
                 case SymbolicRegexKind.Singleton:
                 case SymbolicRegexKind.WatchDog:
                 case SymbolicRegexKind.Epsilon:
@@ -1274,6 +1388,8 @@ namespace Microsoft.SRM
             {
                 case SymbolicRegexKind.EndAnchor:
                 case SymbolicRegexKind.StartAnchor:
+                case SymbolicRegexKind.BOLAnchor:
+                case SymbolicRegexKind.EOLAnchor:
                 case SymbolicRegexKind.Epsilon:
                 case SymbolicRegexKind.Singleton:
                 case SymbolicRegexKind.WatchDog:
@@ -1313,6 +1429,8 @@ namespace Microsoft.SRM
                 {
                     case SymbolicRegexKind.EndAnchor:
                     case SymbolicRegexKind.StartAnchor:
+                    case SymbolicRegexKind.EOLAnchor:
+                    case SymbolicRegexKind.BOLAnchor:
                     case SymbolicRegexKind.Singleton:
                     case SymbolicRegexKind.WatchDog:
                     case SymbolicRegexKind.Epsilon:
@@ -1591,10 +1709,13 @@ namespace Microsoft.SRM
             switch (kind)
             {
                 case SymbolicRegexKind.Epsilon:
-                case SymbolicRegexKind.StartAnchor:
                 case SymbolicRegexKind.WatchDog:
                 case SymbolicRegexKind.EndAnchor:
+                case SymbolicRegexKind.StartAnchor:
+                case SymbolicRegexKind.EOLAnchor:
                     return algebra.False;
+                case SymbolicRegexKind.BOLAnchor:
+                    return builder.newLine.set;
                 case SymbolicRegexKind.Singleton:
                     return this.set;
                 //case SymbolicRegexKind.Sequence:
@@ -1604,7 +1725,7 @@ namespace Microsoft.SRM
                 case SymbolicRegexKind.Concat:
                     {
                         var startSet = this.left.GetStartSet(algebra);
-                        if (left.isNullable || left.kind == SymbolicRegexKind.StartAnchor)
+                        if (left.isNullable || left.IsStartAnchor || left.IsBOLAnchor)
                         {
                             var set2 = this.right.GetStartSet(algebra);
                             startSet = algebra.MkOr(startSet, set2);
@@ -2135,8 +2256,7 @@ namespace Microsoft.SRM
             var e = this.GetEnumerator();
             var R = new List<string>();
             while (e.MoveNext())
-                R.Add(e.Current.ToString());
-            R.Sort();
+                R.Add(e.Current.ToStringForAlts());
             if (R.Count == 0)
                 return res;
             if (kind == SymbolicRegexSetKind.Disjunction)
@@ -2197,12 +2317,12 @@ namespace Microsoft.SRM
                 return CreateConjunction(builder, MkDerivativesOfElems(elem));
         }
 
-        internal SymbolicRegexSet<S> MkDerivative_StartOfLine()
+        internal SymbolicRegexSet<S> MkDerivativesForBorder(BorderSymbol borderSymbol)
         {
             if (kind == SymbolicRegexSetKind.Disjunction)
-                return CreateDisjunction(builder, MkDerivatives_StartOfLine_OfElems());
+                return CreateDisjunction(builder, MkDerivativesForBorder_(borderSymbol));
             else
-                return CreateConjunction(builder, MkDerivatives_StartOfLine_OfElems());
+                return CreateConjunction(builder, MkDerivativesForBorder_(borderSymbol));
         }
 
         IEnumerable<SymbolicRegexNode<S>> MkDerivativesOfElems(S elem)
@@ -2211,10 +2331,10 @@ namespace Microsoft.SRM
                 yield return s.MkDerivative(elem);
         }
 
-        IEnumerable<SymbolicRegexNode<S>> MkDerivatives_StartOfLine_OfElems()  
+        IEnumerable<SymbolicRegexNode<S>> MkDerivativesForBorder_(BorderSymbol borderSymbol)  
         {
             foreach (var s in this)
-                yield return s.builder.MkDerivative_StartOfLine(s);
+                yield return s.builder.MkDerivativeForBorder(borderSymbol, s);
         }
 
         IEnumerable<SymbolicRegexNode<T>> TransformElems<T>(SymbolicRegexBuilder<T> builderT, Func<S, T> predicateTransformer)

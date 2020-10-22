@@ -165,5 +165,159 @@ namespace Microsoft.SRM.Tests
             AssertIsMatchesAgree(r, sr, "a3abcdefgh", true);
             AssertIsMatchesAgree(r, sr, "a3abcdefghi", false);
         }
+
+        static Match M(int index, int length) { return new Match(index, length); }
+
+        [TestMethod]
+        public void TestStartAnchor()
+        {
+            string pat = "^a{2,4}";
+            var sr = new Regex(pat);
+            var r = new System.Text.RegularExpressions.Regex(pat);
+            var input = "aaaa\nab\naaa\nb\naabb";
+            var sr_expectedMatches = new Match[] { M(0, 4) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(1, r_matches.Count);
+            Assert.AreEqual<int>(1, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestEndAnchor()
+        {
+            string pat = "abc$";
+            var sr = new Regex(pat);
+            var r = new System.Text.RegularExpressions.Regex(pat);
+            var input = "abc\naabc\naabc";
+            var sr_expectedMatches = new Match[] { M(10, 3) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(1, r_matches.Count);
+            Assert.AreEqual<int>(1, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestEndAnchor2()
+        {
+            string pat = "a*b*c$";
+            var sr = new Regex(pat);
+            var r = new System.Text.RegularExpressions.Regex(pat);
+            var input = "abc\naabc\naabc";
+            var sr_expectedMatches = new Match[] { M(9, 4) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(1, r_matches.Count);
+            Assert.AreEqual<int>(1, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestStartLineAnchor()
+        {
+            string pat = "^a{2,4}";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.Multiline);
+            var input = "aaaa\nab\naaa\nb\naabb";
+            var sr_expectedMatches = new Match[] { M(0, 4), M(8, 3), M(14, 2) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(3, r_matches.Count);
+            Assert.AreEqual<int>(3, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestEndLineAnchor()
+        {
+            string pat = "ab+$";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.Multiline);
+            var input = "aaaa\nabbbc\nabbbb\ncccab\naabb";
+            var sr_expectedMatches = new Match[] { M(11, 5), M(20, 2), M(24, 3) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(3, r_matches.Count);
+            Assert.AreEqual<int>(3, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestEndLineAnchor2()
+        {
+            string pat = "a*b+$";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.Multiline);
+            var input = "aaaa\nabbbc\nabbbb\ncccab\naabb";
+            var sr_expectedMatches = new Match[] { M(11, 5), M(20, 2), M(23, 4) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(3, r_matches.Count);
+            Assert.AreEqual<int>(3, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestStartAndEndLineAnchors()
+        {
+            string pat = "^a*b+$";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.Multiline);
+            var input = "aaaa\nabbbc\nabbbb\ncccab\naabb";
+            var sr_expectedMatches = new Match[] { M(11, 5), M(23, 4) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(2, r_matches.Count);
+            Assert.AreEqual<int>(2, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestStartAndEndLineAnchors2()
+        {
+            string pat = "^a*b+$";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.Multiline);
+            var input = "aaab\nabbbc\nabbbb\ncccab\naabb";
+            var sr_expectedMatches = new Match[] { M(0, 4), M(11, 5), M(23, 4) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(3, r_matches.Count);
+            Assert.AreEqual<int>(3, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestAllAnchors()
+        {
+            string pat = "\\Aabcd|abc\\z|^abc$";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.Multiline);
+            var input = "abcde\nabce\nabc\naabc\nab\nddabc";
+            var sr_expectedMatches = new Match[] { M(0, 4), M(11,3), M(25,3)};
+            var r_matches = r.Matches(input);
+            var sr_matches = sr.Matches(input).ToList();
+            Assert.AreEqual<int>(3, r_matches.Count);
+            Assert.AreEqual<int>(3, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestAllAnchorsSerializeDeserialize()
+        {
+            string pat = "\\Aabcd|abc\\z|^abc$";
+            var sr1 = new Regex(pat, RegexOptions.Multiline);
+            sr1.Serialize("test.txt");
+            var sr = Regex.Deserialize("test.txt");
+            var r = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.Multiline);
+            var input = "abcde\nabce\nabc\naabc\nab\nddabc";
+            var sr_expectedMatches = new Match[] { M(0, 4), M(11, 3), M(25, 3) };
+            var r_matches = r.Matches(input);
+            var sr_matches = sr.Matches(input).ToList();
+            Assert.AreEqual<int>(3, r_matches.Count);
+            Assert.AreEqual<int>(3, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
     }
 }
