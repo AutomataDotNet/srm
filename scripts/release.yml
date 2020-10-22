@@ -1,13 +1,13 @@
 trigger: none
 
 variables:
-  ReleaseVersion: '1.1.0'
+  ReleaseVersion: '1.2.0'
 
 pool:
   vmImage: "windows-latest"
 
 steps:
-- script: dotnet build srm --configuration Release -p:BuildType=Official --output $(Build.ArtifactStagingDirectory)
+- script: dotnet build srm --configuration Release -p:BuildType=Official -p:Version=$(ReleaseVersion) --output $(Build.ArtifactStagingDirectory)
   displayName: 'Build'
 - task: EsrpCodeSigning@1
   displayName: 'StrongName sign'
@@ -36,7 +36,7 @@ steps:
     SessionTimeout: '60'
     MaxConcurrency: '50'
     MaxRetryAttempts: '5'
-- script: dotnet pack srm /p:PackageVersion=$(ReleaseVersion) --output $(Build.ArtifactStagingDirectory) --no-build /p:OutputPath=$(Build.ArtifactStagingDirectory)
+- script: dotnet pack srm -p:PackageVersion=$(ReleaseVersion) --output $(Build.ArtifactStagingDirectory) --no-build -p:OutputPath=$(Build.ArtifactStagingDirectory)
   displayName: 'Pack'
 - task: EsrpCodeSigning@1
   displayName: 'NuGet sign'
