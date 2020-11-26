@@ -319,5 +319,35 @@ namespace Microsoft.SRM.Tests
             Assert.AreEqual<int>(3, sr_matches.Count);
             CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
         }
+
+        [TestMethod]
+        public void TestRegressionCase()
+        {
+            string pat = @"[\r\n][a-zA-Z0-9/+\r\n]{44}";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat);
+            var input = "\nabcdefghijklmnopqrstuvwxyz0123456789/+ABCDEa";
+            var sr_expectedMatches = new Match[] { M(0, 45) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(1, r_matches.Count);
+            Assert.AreEqual<int>(1, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
+
+        [TestMethod]
+        public void TestRegressionCase2()
+        {
+            string pat = @"\n[a-zA-Z0-9/+\r\n]{44}";
+            var sr = new Regex(pat, RegexOptions.Multiline);
+            var r = new System.Text.RegularExpressions.Regex(pat);
+            var input = "\nabcdefghijklmnopqrstuvwxyz0123456789/+ABCDEa";
+            var sr_expectedMatches = new Match[] { M(0, 45) };
+            var sr_matches = sr.Matches(input).ToList();
+            var r_matches = r.Matches(input);
+            Assert.AreEqual<int>(1, r_matches.Count);
+            Assert.AreEqual<int>(1, sr_matches.Count);
+            CollectionAssert.AreEqual(sr_expectedMatches, sr_matches);
+        }
     }
 }
