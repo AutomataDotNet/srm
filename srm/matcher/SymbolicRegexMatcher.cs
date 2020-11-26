@@ -1292,7 +1292,7 @@ namespace Microsoft.SRM
                         //but the newline character is used in the pattern
                         break;
                     }
-                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
+                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
                     if (regex.isNullable)
                     {
                         //match has been found due to startline anchor
