@@ -1625,7 +1625,7 @@ namespace Microsoft.SRM
                                 var prefix_length = alts_prefix.TakeWhile((x, i) => i < p.Count && x.Equals(p[i])).Count();
                                 alts_prefix = alts_prefix.RemoveRange(prefix_length, alts_prefix.Count - prefix_length);
                             }
-                            return alts_prefix;
+                            return pref.AddRange(alts_prefix);
                         }
                     default:
                         {
