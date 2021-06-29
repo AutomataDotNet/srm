@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
+using System.Text;
 
 namespace Microsoft.SRM
 {
@@ -10,31 +12,122 @@ namespace Microsoft.SRM
     public class Regex
     {
         private static readonly CharSetSolver solver;
-        private static readonly RegexToAutomatonConverter<BDD> converter;
         static Regex()
         {
             solver = new CharSetSolver();
-            converter = new RegexToAutomatonConverter<BDD>(solver);
         }
 
-        private IMatcher matcher;
+        /// <summary>
+        /// The unicode component includes the BDD algebra. It is being shared as a static member for efficiency.
+        /// </summary>
+        internal static readonly Unicode.UnicodeCategoryTheory<BDD> s_unicode = new Unicode.UnicodeCategoryTheory<BDD>(new CharSetSolver());
+
+        internal const string _DFA_incompatible_with = "DFA option is incompatible with ";
+
+        internal IMatcher _matcher;
 
         public Regex(string pattern) : this(pattern, RegexOptions.None) { }
 
-        public Regex(string pattern, RegexOptions options)
+        public Regex(string pattern, RegexOptions options) : this(pattern, options, System.Threading.Timeout.InfiniteTimeSpan) {}
+
+        public Regex(string pattern, RegexOptions options, TimeSpan matchTimeout) : this(pattern, options, matchTimeout, null) {}
+
+        public Regex(string pattern, RegexOptions options, TimeSpan matchTimeout, CultureInfo culture)
         {
-            var root = converter.ConvertToSymbolicRegex(pattern, options, keepAnchors: true);
+            // Parse the input
+            System.Text.RegularExpressions.RegexTree tree = System.Text.RegularExpressions.RegexParser.Parse(pattern, options,
+                culture ?? ((options & RegexOptions.CultureInvariant) != 0 ? CultureInfo.InvariantCulture : CultureInfo.CurrentCulture));
+
+            // TBD: this could potentially be supported quite easily but is not of priority
+            // it essentially affects how the iput string is being processed  -- characters are read backwards --
+            // and what the right semantics of anchors is in this case (perhaps reversed)
+            // if ((options & RegexOptions.RightToLeft) != 0)
+            //     throw new NotSupportedException(SRM.Regex._DFA_incompatible_with + RegexOptions.RightToLeft);
+            // TBD: this could also be supported easily, but is not of priority right now
+            if ((options & RegexOptions.ECMAScript) != 0)
+                throw new NotSupportedException(SRM.Regex._DFA_incompatible_with + RegexOptions.ECMAScript);
+            // TBD: this will eventually be supported
+            // if ((options & RegexOptions.Compiled) != 0)
+            //     throw new NotSupportedException(SRM.Regex._DFA_incompatible_with + RegexOptions.Compiled);
+
+            //fix the culture to be the given one unless it is null
+            //in which case use the InvariantCulture if the option specifies CultureInvariant
+            //otherwise use the current culture
+            var theculture = culture ?? ((options & RegexOptions.CultureInvariant) != 0 ? CultureInfo.InvariantCulture : CultureInfo.CurrentCulture);
+            RegexToAutomatonConverter<BDD> converter = new RegexToAutomatonConverter<BDD>(s_unicode, theculture);
+            CharSetSolver solver = (CharSetSolver)s_unicode.solver;
+            var root = converter.ConvertNodeToSymbolicRegex(tree.Root, true);
+            if (!root.info.ContainsSomeCharacter)
+                throw new NotSupportedException(_DFA_incompatible_with + "characterless pattern");
+            if (root.info.CanBeNullable)
+                throw new NotSupportedException(_DFA_incompatible_with + "pattern allowing 0-length match");
+
             var partition = root.ComputeMinterms();
             if (partition.Length > 64)
             {
-                //more than 64 bits needed to represent a set
-                matcher = new SymbolicRegexBV(root, solver, converter.srBuilder, partition, options);
+                //using BV to represent a predicate
+                BVAlgebra algBV = new BVAlgebra(solver, partition);
+                SymbolicRegexBuilder<BV> builderBV = new SymbolicRegexBuilder<BV>(algBV);
+                //the default constructor sets the following predicates to False, this update happens after the fact
+                //it depends on whether anchors where used in the regex whether the predicates are actually different from False
+                builderBV.wordLetterPredicate = algBV.ConvertFromCharSet(solver, converter.srBuilder.wordLetterPredicate);
+                builderBV.newLinePredicate = algBV.ConvertFromCharSet(solver, converter.srBuilder.newLinePredicate);
+                //convert the BDD based AST to BV based AST
+                SymbolicRegexNode<BV> rootBV = converter.srBuilder.Transform(root, builderBV, bdd => builderBV.solver.ConvertFromCharSet(solver, bdd));
+                SymbolicRegexMatcher<BV> matcherBV = new SymbolicRegexMatcher<BV>(rootBV, solver, partition, options, matchTimeout, theculture);
+                _matcher = matcherBV;
             }
             else
             {
-                //enough to use 64 bits
-                matcher = new SymbolicRegexUInt64(root, solver, converter.srBuilder, partition, options);
+                //using ulong to represent a predicate
+                var alg64 = new BV64Algebra(solver, partition);
+                var builder64 = new SymbolicRegexBuilder<ulong>(alg64);
+                //the default constructor sets the following predicates to False, this update happens after the fact
+                //it depends on whether anchors where used in the regex whether the predicates are actually different from False
+                builder64.wordLetterPredicate = alg64.ConvertFromCharSet(solver, converter.srBuilder.wordLetterPredicate);
+                builder64.newLinePredicate = alg64.ConvertFromCharSet(solver, converter.srBuilder.newLinePredicate);
+                //convert the BDD based AST to ulong based AST
+                SymbolicRegexNode<ulong> root64 = converter.srBuilder.Transform(root, builder64, bdd => builder64.solver.ConvertFromCharSet(solver, bdd));
+                SymbolicRegexMatcher<ulong> matcher64 = new SymbolicRegexMatcher<ulong>(root64, solver, partition, options, matchTimeout, theculture);
+                _matcher = matcher64;
             }
+        }
+
+        /// <summary>
+        /// This constructor is invoked by the deserializer only.
+        /// </summary>
+        private Regex(IMatcher matcher) => _matcher = matcher;
+
+        internal Match? Run(bool quick, int prevlen, string input, int beg, int length, int startat)
+        {
+            if ((uint)startat > (uint)input.Length)
+            {
+                throw new ArgumentOutOfRangeException("startat");
+            }
+            if ((uint)length > (uint)input.Length)
+            {
+                throw new ArgumentOutOfRangeException("length");
+            }
+
+            int endat = Math.Min(beg + length, input.Length) - 1;
+
+            if (startat > endat)
+                return Match.NoMatch;
+
+            var match = _matcher.FindMatch(quick, input, startat, endat);
+            if (quick)
+            {
+                if (match is null)
+                    return null;
+                else
+                    return Match.NoMatch;
+            }
+            else if (match.Success)
+            {
+                return match;
+            }
+            else
+                return Match.NoMatch;
         }
 
         /// <summary>
@@ -44,7 +137,7 @@ namespace Microsoft.SRM
         /// <param name="endat">end position in the input, -1 means that the value is unspecified and taken to be input.Length-1</param>
         /// </summary>
         public bool IsMatch(string input, int startat = 0, int endat = -1)
-            => matcher.IsMatch(input, startat, endat);
+            => _matcher.FindMatch(true, input, startat, endat) is null;
 
         /// <summary>
         /// Returns all matches as pairs (startindex, length) in the input string.
@@ -53,8 +146,64 @@ namespace Microsoft.SRM
         /// <param name="limit">as soon as this many matches have been found the search terminates, 0 or negative value means that there is no bound, default is 0</param>
         /// <param name="startat">start position in the input, default is 0</param>
         /// <param name="endat">end position in the input, -1 means that the value is unspecified and taken to be input.Length-1</param>
-        public List<Match> Matches(string input, int limit = 0, int startat = 0, int endat = -1)
-            => matcher.Matches(input, limit, startat, endat);
+        public List<Match> Matches(string input, int limit = 0, int startat = 0, int endat = -1) {
+            List<Match> results = new List<Match>();
+            Match result = _matcher.FindMatch(false, input, startat, endat);
+            while (result.Success) {
+                results.Add(result);
+                int newStart = result.Index + Math.Max(1, result.Length);
+                if (newStart >= input.Length)
+                    break;
+                result = _matcher.FindMatch(false, input, newStart, endat);
+            }
+            return results;
+        }
+
+        /// <summary>
+        /// Serialize the matcher by appending it into sb.
+        /// Uses characters only from visible ASCII range.
+        /// </summary>
+        private void SerializeStringBuilder(StringBuilder sb) => _matcher.Serialize(sb);
+
+        //it must not be '\n' or a character used to serialize the fragments: 0-9A-Za-z/\+*()[].,-^$;?
+        //avoiding '\n' so that multiple serializations can be stored one per line in an ascii text file
+        internal const char s_top_level_separator = '#';
+
+        /// <summary>
+        /// Deserializes the matcher from the given input string created with Serialize.
+        /// </summary>
+        private static Regex DeserializeString(string input)
+        {
+            input.Split(s_top_level_separator);
+            string[] fragments = input.Split(s_top_level_separator);
+            if (fragments.Length != 15)
+                throw new ArgumentException($"{nameof(Regex.Deserialize)} error", nameof(input));
+
+            try
+            {
+                BVAlgebraBase alg = BVAlgebraBase.Deserialize(fragments[1]);
+                IMatcher matcher = alg is BV64Algebra ?
+                    (IMatcher)new SymbolicRegexMatcher<ulong>(alg as BV64Algebra, fragments) :
+                    (IMatcher)new SymbolicRegexMatcher<BV>(alg as BVAlgebra, fragments);
+                return new Regex(matcher);
+            }
+            catch (Exception e)
+            {
+                throw new ArgumentException($"{nameof(Regex.Deserialize)} error", nameof(input), e);
+            }
+        }
+
+        public override string ToString()
+        {
+            StringBuilder sb = new StringBuilder();
+            SerializeStringBuilder(sb);
+            return sb.ToString();
+        }
+
+        public void SaveDGML(TextWriter writer, int bound, bool hideStateInfo, bool addDotStar, bool inReverse, bool onlyDFAinfo, int maxLabelLength)
+        {
+            _matcher.SaveDGML(writer, bound, hideStateInfo, addDotStar, inReverse, onlyDFAinfo, maxLabelLength);
+        }
         
         /// <summary>
         /// Serialize this symbolic regex matcher to the given file.
@@ -63,11 +212,9 @@ namespace Microsoft.SRM
         /// </summary>
         /// <param name="file">file where the serialization is stored</param>
         /// <param name="formatter">given formatter</param>
-        public void Serialize(string file, IFormatter formatter = null)
+        public void Serialize(string file)
         {
-            var stream = new FileStream(file, FileMode.Create, FileAccess.Write, FileShare.None);
-            Serialize(stream, formatter);
-            stream.Close();
+            Serialize(new FileStream(file, FileMode.Create, FileAccess.Write, FileShare.None));
         }
 
         /// <summary>
@@ -77,11 +224,13 @@ namespace Microsoft.SRM
         /// </summary>
         /// <param name="stream">stream where the serialization is stored</param>
         /// <param name="formatter">given formatter</param>
-        public void Serialize(Stream stream, IFormatter formatter = null)
+        public void Serialize(Stream stream)
         {
-            if (formatter == null)
-                formatter = new BinaryFormatter();
-            formatter.Serialize(stream, this);
+            var streamWriter = new StreamWriter(stream);
+            StringBuilder sb = new StringBuilder();
+            SerializeStringBuilder(sb);
+            streamWriter.Write(sb.ToString());
+            streamWriter.Close();
         }
 
         /// <summary>
@@ -92,12 +241,9 @@ namespace Microsoft.SRM
         /// <param name="file">source file of the serialized matcher</param>
         /// <param name="formatter">given formatter</param>
         /// <returns></returns>
-        public static Regex Deserialize(string file, IFormatter formatter = null)
+        public static Regex Deserialize(string file)
         {
-            Stream stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
-            Regex matcher = Deserialize(stream, formatter);
-            stream.Close();
-            return matcher;
+            return Deserialize(new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read));
         }
 
         /// <summary>
@@ -108,11 +254,11 @@ namespace Microsoft.SRM
         /// <param name="stream">source stream of the serialized matcher</param>
         /// <param name="formatter">given formatter</param>
         /// <returns></returns>
-        public static Regex Deserialize(Stream stream, IFormatter formatter = null)
+        public static Regex Deserialize(Stream stream)
         {
-            if (formatter == null)
-                formatter = new BinaryFormatter();
-            Regex matcher = (Regex)formatter.Deserialize(stream);
+            var streamReader = new StreamReader(stream);
+            Regex matcher = DeserializeString(streamReader.ReadToEnd());
+            streamReader.Close();
             return matcher;
         }
     }

@@ -1,4 +1,7 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -9,11 +12,9 @@ namespace Microsoft.SRM
     /// Provides a generic implementation for minterm generation over a given Boolean Algebra.
     /// </summary>
     /// <typeparam name="PRED">type of predicates</typeparam>
-    public class MintermGenerator<PRED> 
+    internal class MintermGenerator<PRED>
     {
-        IBooleanAlgebra<PRED> ba;
-
-        bool hashCodesRespectEquivalence;
+        private IBooleanAlgebra<PRED> _ba;
 
         /// <summary>
         /// Constructs a minterm generator for a given Boolean Algebra.
@@ -21,33 +22,30 @@ namespace Microsoft.SRM
         /// <param name="ba">given Boolean Algebra</param>
         public MintermGenerator(IBooleanAlgebra<PRED> ba)
         {
-            this.ba = ba;
-            hashCodesRespectEquivalence = ba.IsExtensional;
-        }
-
-        /// <summary>
-        /// Returns GenerateMinterms(true, preds).
-        /// </summary>
-        public IEnumerable<Tuple<bool[], PRED>> GenerateMinterms(params PRED[] preds)
-        {
-            return GenerateMinterms(true, preds);
+#if DEBUG
+            if (!ba.HashCodesRespectEquivalence)
+                //cannot rely on equivalent predicates having the same hashcode
+                //so all predicates would end up in the same bucket that causes a linear search
+                //with Equals to check equivalence --- this case must never arise here
+                throw new AutomataException(AutomataExceptionKind.InternalError_SymbolicRegex);
+#endif
+            _ba = ba;
         }
 
         /// <summary>
         /// Given an array of predidates {p_1, p_2, ..., p_n} where n>=0.
         /// Enumerate all satisfiable Boolean combinations Tuple({b_1, b_2, ..., b_n}, p)
-        /// where p is satisfiable and equivalent to p'_1 &amp; p'_2 &amp; ... &amp; p'_n, 
+        /// where p is satisfiable and equivalent to p'_1 &amp; p'_2 &amp; ... &amp; p'_n,
         /// where p'_i = p_i if b_i = true and p'_i is Not(p_i) otherwise.
         /// If n=0 return Tuple({},True).
         /// </summary>
         /// <param name="preds">array of predicates</param>
-        /// <param name="useEquivalenceChecking">optimization flag: if true, uses equivalence checking to cluster equivalent predicates; otherwise does not use equivalence checking</param>
-        /// <returns>all minterms of the given predicate sequence</returns>
-        public IEnumerable<Tuple<bool[], PRED>> GenerateMinterms(bool useEquivalenceChecking, params PRED[] preds)
+       /// <returns>all minterms of the given predicate sequence</returns>
+        public IEnumerable<Tuple<bool[], PRED>> GenerateMinterms(params PRED[] preds)
         {
             if (preds.Length == 0)
             {
-                yield return new Tuple<bool[], PRED>(new bool[] { }, ba.True);
+                yield return new Tuple<bool[], PRED>(Array.Empty<bool>(), _ba.True);
             }
             else
             {
@@ -55,7 +53,7 @@ namespace Microsoft.SRM
 
                 List<PRED> nonequivalentSets = new List<PRED>();
 
-                //work only with nonequivalent sets as distinct elements 
+                //work only with nonequivalent sets as distinct elements
                 var indexLookup = new Dictionary<int, int>();
                 var newIndexMap = new Dictionary<EquivClass, int>();
                 var equivs = new List<List<int>>();
@@ -63,7 +61,7 @@ namespace Microsoft.SRM
                 for (int i = 0; i < count; i++)
                 {
                     int newIndex;
-                    EquivClass equiv = CreateEquivalenceClass(useEquivalenceChecking, preds[i]);
+                    EquivClass equiv = CreateEquivalenceClass(preds[i]);
                     if (!newIndexMap.TryGetValue(equiv, out newIndex))
                     {
                         newIndex = newIndexMap.Count;
@@ -86,7 +84,7 @@ namespace Microsoft.SRM
                 //        new Tuple<bool[], PRED>(characteristic, pair.Second);
                 //}
 
-                var tree = new PartitonTree<PRED>(ba);
+                var tree = new PartitonTree<PRED>(_ba);
                 foreach (var psi in nonequivalentSets)
                     tree.Refine(psi);
                 foreach (var leaf in tree.GetLeaves())
@@ -101,53 +99,43 @@ namespace Microsoft.SRM
             }
         }
 
-        EquivClass CreateEquivalenceClass(bool useEquivalenceChecking, PRED set)
+        private EquivClass CreateEquivalenceClass(PRED set)
         {
-            return new EquivClass(useEquivalenceChecking, this, set);
+            return new EquivClass(_ba, set);
         }
 
+        /// <summary>
+        /// Wraps a predicate as an equivalence class object whose Equals method is Equivalence checking
+        /// </summary>
         private class EquivClass
         {
-            PRED set;
-            MintermGenerator<PRED> gen;
-            bool useEquivalenceChecking;
+            private PRED _set;
+            private IBooleanAlgebra<PRED> _ba;
 
-            internal EquivClass(bool useEquivalenceChecking, MintermGenerator<PRED> gen, PRED set)
+            internal EquivClass(IBooleanAlgebra<PRED> ba, PRED set)
             {
-                this.set = set;
-                this.gen = gen;
-                this.useEquivalenceChecking = useEquivalenceChecking;
+                _set = set;
+                _ba = ba;
             }
 
             public override int GetHashCode()
             {
-                if (useEquivalenceChecking && !gen.hashCodesRespectEquivalence)
-                    //cannot rely on equivalent predicates having the same hashcode
-                    //so all predicates end up in the same bucket that causes a linear search
-                    //with Equals to check equivalence when useEquivalenceChecking=true
-                    return 0; 
-                else
-                    return set.GetHashCode();
+                return _set.GetHashCode();
             }
 
-            public override bool Equals(object obj)
-            {
-                if (useEquivalenceChecking)
-                    return gen.ba.AreEquivalent(set, ((EquivClass)obj).set);
-                else
-                    return set.Equals(((EquivClass)obj).set);
-            }
+            public override bool Equals(object obj) =>
+                obj is EquivClass ec && _ba.AreEquivalent(_set, ec._set);
         }
     }
 
     internal class PartitonTree<PRED>
     {
-        PartitonTree<PRED> parent;
-        int nr;
+        private PartitonTree<PRED> parent;
+        private int nr;
         internal PRED phi;
-        IBooleanAlgebra<PRED> solver;
-        PartitonTree<PRED> left;   
-        PartitonTree<PRED> right;  //complement
+        private IBooleanAlgebra<PRED> solver;
+        private PartitonTree<PRED> left;
+        private PartitonTree<PRED> right;  //complement
         internal PartitonTree(IBooleanAlgebra<PRED> solver)
         {
             this.solver = solver;
@@ -157,7 +145,7 @@ namespace Microsoft.SRM
             this.left = null;
             this.right = null;
         }
-        PartitonTree(IBooleanAlgebra<PRED> solver, int depth, PartitonTree<PRED> parent, PRED phi, PartitonTree<PRED> left, PartitonTree<PRED> right)
+        private PartitonTree(IBooleanAlgebra<PRED> solver, int depth, PartitonTree<PRED> parent, PRED phi, PartitonTree<PRED> left, PartitonTree<PRED> right)
         {
             this.solver = solver;
             this.parent = parent;
@@ -170,7 +158,7 @@ namespace Microsoft.SRM
         internal void Refine(PRED psi)
         {
 
-            if (left == null && right == null) 
+            if (left == null && right == null)
             {
                 #region leaf
                 var phi_and_psi = solver.MkAnd(phi, psi);

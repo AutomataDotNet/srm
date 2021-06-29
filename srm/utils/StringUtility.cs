@@ -1,4 +1,7 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -12,7 +15,7 @@ namespace Microsoft.SRM
     {
         #region Escaping strings
         ///// <summary>
-        ///// 
+        /////
         ///// </summary>
 
         /// <summary>
@@ -37,62 +40,72 @@ namespace Microsoft.SRM
                     return string.Format("\\u{0:X}", code);
             }
 
+            //special characters
+            switch (c)
+            {
+                case '.':
+                    return @"\.";
+                case '[':
+                    return @"\[";
+                case ']':
+                    return @"\]";
+                case '(':
+                    return @"\(";
+                case ')':
+                    return @"\)";
+                case '{':
+                    return @"\{";
+                case '}':
+                    return @"\}";
+                case '?':
+                    return @"\?";
+                case '+':
+                    return @"\+";
+                case '*':
+                    return @"\*";
+                case '|':
+                    return @"\|";
+                case '\\':
+                    return @"\\";
+                case '^':
+                    return @"\^";
+                case '$':
+                    return @"\$";
+                case '-':
+                    return @"\-";
+                case ':':
+                    return @"\:";
+                case '\"':
+                    return "\\\"";
+                case '\0':
+                    return @"\0";
+                case '\t':
+                    return @"\t";
+                case '\r':
+                    return @"\r";
+                case '\v':
+                    return @"\v";
+                case '\f':
+                    return @"\f";
+                case '\n':
+                    return @"\n";
+                default:
+                    break;
+            }
+
             if (code > 255)
                 return ToUnicodeRepr(code);
 
             if (code <= 255 && code > 126)
                 return string.Format("\\x{0:X}", code);
 
-            switch (c)
-            {
-                case '\0':
-                    return @"\0";
-                //case '\a':
-                //    return @"\a";
-                //case '\b':
-                //    return @"\b";
-                //case '\t':
-                //    return @"\t";
-                //case '\r':
-                //    return @"\r";
-                //case '\v':
-                //    return @"\v";
-                //case '\f':
-                //    return @"\f";
-                case '\n':
-                    return @"\n";
-                case '=':
-                    return "=";
-                case ';':
-                    return ";";
-                case '/':
-                    return "/";
-                case '!':
-                    return "!";
-                //case '>':
-                //    return ">";
-                //case '\"':
-                //    return "\\\"";
-                //case '\'':
-                //    return "\\\'";
-                //case ' ':
-                //    return " ";
-                //case '\\' :
-                //    return @"\\";
-                default:
-                    if (code <= 15)
-                    {
-                        return string.Format("\\x0{0:X}", code);
-                    }
-                    else if (!(((int)'a') <= code && code <= ((int)'z'))
-                         && !(((int)'A') <= code && code <= ((int)'Z'))
-                         && !(((int)'0') <= code && code <= ((int)'9')))
-                    {
-                        return string.Format("\\x{0:X}", code);
-                    }
-                    else
-                        return c.ToString();
-            }
+            if (code >= 32 && code <= 126)
+                return c.ToString();
+
+            if (code <= 15)
+                return string.Format("\\x0{0:X}", code);
+            else
+                return string.Format("\\x{0:X}", code);
         }
 
         /// <summary>
@@ -107,7 +120,7 @@ namespace Microsoft.SRM
                 return Escape(c);
         }
 
-        static string ToUnicodeRepr(int i)
+        private static string ToUnicodeRepr(int i)
         {
             string s = string.Format("{0:X}", i);
             if (s.Length == 1)
@@ -122,47 +135,16 @@ namespace Microsoft.SRM
         }
 
         /// <summary>
-        /// Makes an escaped string from a literal string s. 
-        /// Appends '\"' at the start and end of the encoded string.
+        /// Makes an escaped string from a literal string s.
         /// </summary>
         public static string Escape(string s)
         {
             StringBuilder sb = new StringBuilder();
-            sb.Append("\"");
             foreach (char c in s)
-            {
                 sb.Append(Escape(c));
-            }
-            sb.Append("\"");
             return sb.ToString();
         }
 
-        /// <summary>
-        /// Unescapes any escaped characters in in the input string. 
-        /// (Same as System.Text.RegularExpressions.Regex.Unescape)
-        /// </summary>
-        public static string Unescape(string s)
-        {
-            return System.Text.RegularExpressions.Regex.Unescape(s);
-        }
         #endregion
-
-        internal static string SerializeStringToCharCodeSequence(string s)
-        {
-            if (string.IsNullOrEmpty(s))
-                return s;
-            var encodedChars = Array.ConvertAll(s.ToCharArray(), c => ((int)c).ToString());
-            var serialized = string.Join(",", encodedChars);
-            return serialized;
-        }
-
-        internal static string DeserializeStringFromCharCodeSequence(string s)
-        {
-            if (string.IsNullOrEmpty(s))
-                return s;
-            var encodedChars = s.Split(',');
-            var deserialized = new String(Array.ConvertAll(encodedChars, x => (char)(int.Parse(x))));
-            return deserialized;
-        }
     }
 }

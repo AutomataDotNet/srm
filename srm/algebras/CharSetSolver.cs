@@ -1,7 +1,11 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Collections.Generic;
 //using RestrictKeyType = System.Int64;
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Microsoft.SRM
@@ -11,68 +15,53 @@ namespace Microsoft.SRM
     /// and to construct an SFA over character sets from a regex.
     /// Character sets are represented by bitvector sets.
     /// </summary>
-    public class CharSetSolver : BDDAlgebra, ICharAlgebra<BDD>
+    internal class CharSetSolver : BDDAlgebra, ICharAlgebra<BDD>
     {
+        /// <summary>
+        /// BDDs for all characters for fast lookup.
+        /// </summary>
+        private BDD[] charPredTable = new BDD[0x10000];
 
-        int _bw;
-
-        public BitWidth Encoding
-        {
-            get { return (BitWidth)_bw; }
-        }
+        internal BDD nonascii;
 
         /// <summary>
-        /// Construct the solver for BitWidth.BV16
+        /// Construct the solver.
         /// </summary>
-        public CharSetSolver() : this(BitWidth.BV16)
+        public CharSetSolver()
         {
+            nonascii = MkCharSetFromRange('\x80', '\uFFFF');
+            _IgnoreCase = new Unicode.IgnoreCaseTransformer(this);
         }
+
+        private Unicode.IgnoreCaseTransformer _IgnoreCase;
 
         /// <summary>
-        /// Construct a character set solver for the given character encoding (nr of bits).
+        /// Make a character predicate for the given character c.
         /// </summary>
-        public CharSetSolver(BitWidth bits) : base()
+        public BDD MkCharConstraint(char c, bool ignoreCase = false, string culture = null)
         {
-            if (!CharacterEncodingTool.IsSpecified(bits))
-                throw new AutomataException(AutomataExceptionKind.CharacterEncodingIsUnspecified);
-            _bw = (int)bits;
-        }
-
-        IgnoreCaseTransformer _IgnoreCase = null;
-        IgnoreCaseTransformer IgnoreCase
-        {
-            get
+            if (ignoreCase)
             {
-                if (_IgnoreCase == null)
-                    _IgnoreCase = new IgnoreCaseTransformer(this);
-                return _IgnoreCase;
+                return _IgnoreCase.Apply(c, culture);
+            }
+            else
+            {
+                //individual character BDDs are always fixed
+                if (charPredTable[c] == null)
+                    charPredTable[c] = MkSetFrom(c, 15);
+                return charPredTable[c];
             }
         }
 
-        BDD[] charPredTable = new BDD[1 << 16];
-
         /// <summary>
-        /// Make a character containing the given character c.
-        /// If c is a lower case or upper case character and ignoreCase is true
-        /// then add both the upper case and the lower case characters.
-        /// </summary>
-        public BDD MkCharConstraint(char c, bool ignoreCase = false)
-        {
-            int i = (int)c;
-            if (charPredTable[i] == null)
-                charPredTable[i] = MkSetFrom((uint)c, _bw - 1);
-            if (ignoreCase)
-                return IgnoreCase.Apply(charPredTable[i]);
-            return charPredTable[i];
-        }
-
-        /// <summary>
-        /// Make a CharSet from all the characters in the range from m to n. 
+        /// Make a CharSet from all the characters in the range from m to n.
         /// Returns the empty set if n is less than m
         /// </summary>
         public BDD MkCharSetFromRange(char m, char n)
         {
-            return MkSetFromRange((uint)m, (uint)n, _bw-1);
+            if (m == n)
+                return MkCharConstraint(m);
+            return MkSetFromRange((uint)m, (uint)n, 15);
         }
 
         /// <summary>
@@ -82,7 +71,7 @@ namespace Microsoft.SRM
         {
             BDD res = False;
             foreach (var range in ranges)
-                res = MkOr(res, MkSetFromRange(range.Item1, range.Item2, _bw -1));
+                res = MkOr(res, MkSetFromRange(range.Item1, range.Item2, 15));
             return res;
         }
 
@@ -90,11 +79,14 @@ namespace Microsoft.SRM
         /// Make a character set of all the characters in the interval from c to d.
         /// If ignoreCase is true ignore cases for upper and lower case characters by including both versions.
         /// </summary>
-        public BDD MkRangeConstraint(char c, char d, bool ignoreCase = false)
+        public BDD MkRangeConstraint(char c, char d, bool ignoreCase = false, string culture = null)
         {
-            var res = MkSetFromRange((uint)c, (uint)d, _bw - 1);
+            if (c == d)
+                return MkCharConstraint(c, ignoreCase, culture);
+
+            var res = MkSetFromRange((uint)c, (uint)d, 15);
             if (ignoreCase)
-                res = IgnoreCase.Apply(res);
+                res = _IgnoreCase.Apply(res, culture);
             return res;
         }
 
@@ -105,154 +97,14 @@ namespace Microsoft.SRM
         {
             BDD bdd = False;
             foreach (var range in ranges)
-                bdd = MkOr(bdd, MkSetFromRange((uint)range[0], (uint)range[1], _bw - 1));
+                bdd = MkOr(bdd, MkSetFromRange((uint)range[0], (uint)range[1], 15));
             return bdd;
         }
-
-        #region Serialializing and deserializing BDDs
-
-        /// <summary>
-        /// Represent the set as an integer array.
-        /// Assumes that the bdd has less than 2^14 nodes and at most 16 variables.
-        /// </summary>
-        internal int[] SerializeCompact(BDD bdd)
-        {
-            //return SerializeBasedOnRanges(bdd);
-            return SerializeCompact2(bdd);
-        }
-
-        /// <summary>
-        /// Represent the set as an integer array.
-        /// Assumes that the bdd has at most 2^14 nodes and at most 16 variables.
-        /// </summary>
-        int[] SerializeCompact2(BDD bdd)
-        {
-            // encode the bdd directly
-            //
-            // the element at index 0 is the false node
-            // the element at index 1 is the true node 
-            // and entry at index i>1 is node i and has the structure 
-            // (ordinal trueNode falseNode)
-            // where ordinal uses 4 bits and trueNode and falseNode each use 14 bits
-            // Assumes that the bdd has less than 2^14 nodes and at most 16 variables.
-            // BDD.False is represented by int[]{0}.
-            // BDD.True is represented by int[]{0,0}.
-            // The root of the BDD (Other than True or False) is node 2
-
-            if (bdd.IsEmpty)
-                return new int[] { 0 };
-            if (bdd.IsFull)
-                return new int[] { 0, 0 };
-
-            int nrOfNodes = bdd.CountNodes();
-
-            if (nrOfNodes > (1 << 14))
-                throw new AutomataException(AutomataExceptionKind.CompactSerializationNodeLimitViolation);
-
-            int[] res = new int[nrOfNodes];
-
-
-            //here we know that bdd is neither empty nor full
-            var done = new Dictionary<BDD, int>();
-            done[False] = 0;
-            done[True] = 1;
-
-            Stack<BDD> stack = new Stack<BDD>();
-            stack.Push(bdd);
-            done[bdd] = 2;
-
-            int doneCount = 3;
-
-            while (stack.Count > 0)
-            {
-                BDD b = stack.Pop();
-                if (!done.ContainsKey(b.One))
-                {
-                    done[b.One] = (doneCount++);
-                    stack.Push(b.One);
-                }
-                if (!done.ContainsKey(b.Zero))
-                {
-                    done[b.Zero] = (doneCount++);
-                    stack.Push(b.Zero);
-                }
-                int bId = done[b];
-                int fId = done[b.Zero];
-                int tId = done[b.One];
-
-                if (b.Ordinal > 15)
-                    throw new AutomataException(AutomataExceptionKind.CompactSerializationBitLimitViolation);
-
-                res[bId] = (b.Ordinal << 28) | (tId << 14) | fId;
-            }
-            return res;
-        }
-
-        /// <summary>
-        /// Recreates a BDD from an int array that has been created using SerializeCompact
-        /// </summary>
-        internal BDD DeserializeCompact(int[] arcs)
-        {
-            //return DeserializeBasedOnRanges(arcs);
-            return DeserializeCompact2(arcs);
-        }
-
-        /// <summary>
-        /// Recreates a BDD from an int array that has been created using SerializeCompact
-        /// </summary>
-        BDD DeserializeCompact2(int[] arcs) 
-        {
-            if (arcs.Length == 1)
-                return False;
-            if (arcs.Length == 2)
-                return True;
-
-            //organized by order
-            //note that all arcs are strictly increasing in levels
-            var levels = new List<int>[16];
-
-            BDD[] bddMap = new BDD[arcs.Length];
-            bddMap[0] = False;
-            bddMap[1] = True;
-
-            for (int i = 2; i < arcs.Length; i++)
-            {
-                int x = ((arcs[i] >> 28) & 0xF);
-                if (levels[x] == null)
-                    levels[x] = new List<int>();
-                levels[x].Add(i);
-            }
-
-            //create the BDD nodes according to the levels x
-            //this is to ensure proper internalization
-            for (int x = 0; x < 16; x++)
-            {
-                if (levels[x] != null)
-                {
-                    foreach (int i in levels[x])
-                    {
-                        int one = ((arcs[i] >> 14) & 0x3FFF);
-                        int zero = (arcs[i] & 0x3FFF);
-                        if (one > bddMap.Length || zero > bddMap.Length)
-                            throw new AutomataException(AutomataExceptionKind.CompactDeserializationError);
-                        var oneBranch = bddMap[one];
-                        var zeroBranch = bddMap[zero];
-                        var bdd = MkBvSet(x, oneBranch, zeroBranch);
-                        bddMap[i] = bdd;
-                        if (bdd.Ordinal <= bdd.One.Ordinal || bdd.Ordinal <= bdd.Zero.Ordinal)
-                            throw new AutomataException(AutomataExceptionKind.CompactDeserializationError);
-                    }
-                }
-            }
-
-            return bddMap[2];
-        }
-        #endregion
 
         /// <summary>
         /// Identity function, returns s.
         /// </summary>
-        public BDD ConvertFromCharSet(BDD s)
+        public BDD ConvertFromCharSet(BDDAlgebra _, BDD s)
         {
             return s;
         }
@@ -265,17 +117,9 @@ namespace Microsoft.SRM
             get { return this; }
         }
 
-        /// <summary>
-        /// Returns pred.
-        /// </summary>
-        public BDD MkCharPredicate(string name, BDD pred)
+        public IEnumerable<char> GenerateAllCharacters(BDD bvSet, bool inReverseOrder = false)
         {
-            return pred;
-        }
-
-        public IEnumerable<char> GenerateAllCharacters(BDD bvSet, bool inRevereseOrder = false)
-        {
-            foreach (var c in GenerateAllElements(bvSet, inRevereseOrder))
+            foreach (var c in GenerateAllElements(bvSet, inReverseOrder))
                 yield return (char)c;
         }
 
@@ -292,7 +136,7 @@ namespace Microsoft.SRM
         /// <returns>the cardinality of the set</returns>
         public ulong ComputeDomainSize(BDD set)
         {
-            var card = ComputeDomainSize(set, _bw - 1);
+            var card = ComputeDomainSize(set, 15);
             return card;
         }
 
@@ -303,7 +147,7 @@ namespace Microsoft.SRM
         /// <returns>true iff the set is a singleton</returns>
         public bool IsSingleton(BDD set)
         {
-            var card = ComputeDomainSize(set, _bw - 1);
+            var card = ComputeDomainSize(set, 15);
             return card == (long)1;
         }
 
@@ -313,10 +157,10 @@ namespace Microsoft.SRM
         /// </summary>
         public Tuple<uint, uint>[] ToRanges(BDD set, int limit = 0)
         {
-            return ToRanges(set, _bw - 1, limit);
+            return ToRanges(set, 15, limit);
         }
 
-        IEnumerable<uint> GenerateAllCharactersInOrder(BDD set)
+        private IEnumerable<uint> GenerateAllCharactersInOrder(BDD set)
         {
             var ranges = ToRanges(set);
             foreach (var range in ranges)
@@ -324,7 +168,7 @@ namespace Microsoft.SRM
                     yield return (uint)i;
         }
 
-        IEnumerable<uint> GenerateAllCharactersInReverseOrder(BDD set)
+        private IEnumerable<uint> GenerateAllCharactersInReverseOrder(BDD set)
         {
             var ranges = ToRanges(set);
             for (int j = ranges.Length - 1; j >= 0; j--)
@@ -348,33 +192,221 @@ namespace Microsoft.SRM
                 return GenerateAllCharactersInOrder(set);
         }
 
-        IEnumerable<uint> GenerateNothing()
+        private IEnumerable<uint> GenerateNothing()
         {
             yield break;
         }
 
-        public BDD ConvertToCharSet(BDDAlgebra alg, BDD pred)
+        public BDD ConvertToCharSet(ICharAlgebra<BDD> _, BDD pred)
         {
             return pred;
         }
-
-        #region code generation 
 
         public BDD[] GetPartition()
         {
             throw new NotSupportedException();
         }
 
-        #endregion
-
-        public override string SerializePredicate(BDD s)
+        public string PrettyPrint(BDD pred)
         {
-            throw new NotImplementedException();
+            if (pred.IsEmpty)
+                return "[]";
+
+            //check if pred is full, show this case with a dot
+            if (pred.IsFull)
+                return ".";
+
+            #region try to optimize representation involving common direct use of \d \w and \s to avoid blowup of ranges
+            if (SRM.Regex.s_unicode != null)
+            {
+                BDD digit = Regex.s_unicode.CategoryCondition(8);
+                if (pred == Regex.s_unicode.WordLetterCondition)
+                    return @"\w";
+                if (pred == Regex.s_unicode.WhiteSpaceCondition)
+                    return @"\s";
+                if (pred == digit)
+                    return @"\d";
+                if (pred == MkNot(Regex.s_unicode.WordLetterCondition))
+                    return @"\W";
+                if (pred == MkNot(Regex.s_unicode.WhiteSpaceCondition))
+                    return @"\S";
+                if (pred == MkNot(digit))
+                    return @"\D";
+            }
+            #endregion
+
+            var ranges = ToRanges(pred);
+
+            if (IsSingletonRange(ranges))
+                return StringUtility.Escape((char)ranges[0].Item1);
+
+            #region if too many ranges try to optimize the representation using \d \w etc.
+            if (SRM.Regex.s_unicode != null && ranges.Length > 10)
+            {
+                BDD w = Regex.s_unicode.WordLetterCondition;
+                BDD W = MkNot(w);
+                BDD d = Regex.s_unicode.CategoryCondition(8);
+                BDD D = MkNot(d);
+                BDD asciiDigit = MkCharSetFromRange('0', '9');
+                BDD nonasciiDigit = MkAnd(d, MkNot(asciiDigit));
+                BDD s = Regex.s_unicode.WhiteSpaceCondition;
+                BDD S = MkNot(s);
+                BDD wD = MkAnd(w, D);
+                BDD SW = MkAnd(S, W);
+                //s, d, wD, SW are the 4 main large minterms
+                //note: s|SW = W, d|wD = w
+                //
+                // Venn Diagram: s and w do not overlap, and d is contained in w
+                // ------------------------------------------------
+                // |                                              |
+                // |              SW     ------------(w)--------  |
+                // |   --------          |                     |  |
+                // |   |      |          |        ----------   |  |
+                // |   |  s   |          |  wD    |        |   |  |
+                // |   |      |          |        |   d    |   |  |
+                // |   --------          |        |        |   |  |
+                // |                     |        ----------   |  |
+                // |                     -----------------------  |
+                // ------------------------------------------------
+                //
+                //-------------------------------------------------------------------
+                // singletons
+                //---
+                if (MkOr(s, pred) == s)
+                    return RepresentSetInPattern("[^\\S{0}]", MkAnd(s, MkNot(pred)));
+                //---
+                if (MkOr(d, pred) == d)
+                    return RepresentSetInPattern("[^\\D{0}]", MkAnd(d, MkNot(pred)));
+                //---
+                if (MkOr(wD, pred) == wD)
+                    return RepresentSetInPattern("[\\w-[\\d{0}]]", MkAnd(wD, MkNot(pred)));
+                //---
+                if (MkOr(SW, pred) == SW)
+                    return RepresentSetInPattern("[^\\s\\w{0}]", MkAnd(SW, MkNot(pred)));
+                //-------------------------------------------------------------------
+                // unions of two
+                // s|SW
+                if (MkOr(W, pred) == W)
+                {
+                    string repr1 = null;
+                    if (MkAnd(s, pred) == s)
+                        //pred contains all of \s and is contained in \W
+                        repr1 = RepresentSetInPattern("[\\s{0}]", MkAnd(S, pred));
+                    //the more common case is that pred is not \w and not some specific non-word character such as ':'
+                    string repr2 = RepresentSetInPattern("[^\\w{0}]", MkAnd(W, MkNot(pred)));
+                    if (repr1 != null && repr1.Length < repr2.Length)
+                        return repr1;
+                    else
+                        return repr2;
+                }
+                //---
+                // s|d
+                BDD s_or_d = MkOr(s, d);
+                if (pred == s_or_d)
+                    return "[\\s\\d]";
+                if (MkOr(s_or_d, pred) == s_or_d)
+                {
+                    //check first if this is purely ascii range for digits
+                    if (MkAnd(pred, s).Equals(s) && MkAnd(pred, nonasciiDigit).IsEmpty)
+                        return string.Format("[\\s{0}]", RepresentRanges(ToRanges(MkAnd(pred, asciiDigit)), false));
+                    else
+                        return RepresentSetInPattern("[\\s\\d-[{0}]]", MkAnd(s_or_d, MkNot(pred)));
+                }
+                //---
+                // s|wD
+                BDD s_or_wD = MkOr(s, wD);
+                if (MkOr(s_or_wD, pred) == s_or_wD)
+                    return RepresentSetInPattern("[\\s\\w-[\\d{0}]]", MkAnd(s_or_wD, MkNot(pred)));
+                //---
+                // d|wD
+                if (MkOr(w, pred) == w)
+                    return RepresentSetInPattern("[\\w-[{0}]]", MkAnd(w, MkNot(pred)));
+                //---
+                // d|SW
+                BDD d_or_SW = MkOr(d, SW);
+                if (pred == d_or_SW)
+                    return "\\d|[^\\s\\w]";
+                if (MkOr(d_or_SW, pred) == d_or_SW)
+                    return RepresentSetInPattern("[\\d-[{0}]]|[^\\s\\w{1}]", MkAnd(d, MkNot(pred)), MkAnd(SW, MkNot(pred)));
+                // wD|SW = S&D
+                BDD SD = MkOr(wD, SW);
+                if (MkOr(SD, pred) == SD)
+                    return RepresentSetInPattern("[^\\s\\d{0}]", MkAnd(SD, MkNot(pred)));
+                //-------------------------------------------------------------------
+                //unions of three
+                // s|SW|wD = D
+                if (MkOr(D, pred) == D)
+                    return RepresentSetInPattern("[^\\d{0}]", MkAnd(D, MkNot(pred)));
+                // SW|wD|d = S
+                if (MkOr(S, pred) == S)
+                    return RepresentSetInPattern("[^\\s{0}]", MkAnd(S, MkNot(pred)));
+                // s|SW|d = complement of wD = W|d
+                BDD W_or_d = MkNot(wD);
+                if (MkOr(W_or_d, pred) == W_or_d)
+                    return RepresentSetInPattern("[\\W\\d-[{0}]]", MkAnd(W_or_d, MkNot(pred)));
+                // s|wD|d = s|w
+                BDD s_or_w = MkOr(s, w);
+                if (MkOr(s_or_w, pred) == s_or_w)
+                    return RepresentSetInPattern("[\\s\\w-[{0}]]", MkAnd(s_or_w, MkNot(pred)));
+                //-------------------------------------------------------------------
+                //touches all four minterms, typically happens as the fallback arc in .* extension
+            }
+            #endregion
+
+            //rpresent either the ranges or its complemet,
+            //if the complement representation is more copmpact
+            string ranges_repr = "[" + RepresentRanges(ranges, false) + "]";
+            string ranges_compl_repr = "[^" + RepresentRanges(ToRanges(MkNot(pred)), false) + "]";
+            if (ranges_repr.Length <= ranges_compl_repr.Length)
+                return ranges_repr;
+            else
+                return ranges_compl_repr;
         }
 
-        public override BDD DeserializePredicate(string s)
+
+        private string RepresentSetInPattern(string pat, BDD set)
         {
-            throw new NotImplementedException();
+            var str = (set.IsEmpty ? "" : RepresentRanges(ToRanges(set)));
+            var res = string.Format(pat, str);
+            return res;
         }
+
+        private string RepresentSetInPattern(string pat, BDD set1, BDD set2)
+        {
+            var str1 = (set1.IsEmpty ? "" : RepresentRanges(ToRanges(set1)));
+            var str2 = (set2.IsEmpty ? "" : RepresentRanges(ToRanges(set2)));
+            var res = string.Format(pat, str1, str2);
+            return res;
+        }
+
+        private static string RepresentRanges(Tuple<uint, uint>[] ranges, bool checkSingletonComlement = true)
+        {
+            //check if ranges represents a complement of a singleton
+            if (checkSingletonComlement && ranges.Length == 2 &&
+                ranges[0].Item1 == 0 && ranges[1].Item2 == 0xFFFF &&
+                ranges[0].Item2 + 2 == ranges[1].Item1)
+                    return "^" + (StringUtility.Escape((char)(ranges[0].Item2 + 1)));
+
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < ranges.Length; i++)
+            {
+                if (ranges[i].Item1 == ranges[i].Item2)
+                    sb.Append(StringUtility.Escape((char)ranges[i].Item1));
+                else if (ranges[i].Item2 == ranges[i].Item1 + 1)
+                {
+                    sb.Append(StringUtility.Escape((char)ranges[i].Item1));
+                    sb.Append(StringUtility.Escape((char)ranges[i].Item2));
+                }
+                else
+                {
+                    sb.Append(StringUtility.Escape((char)ranges[i].Item1));
+                    sb.Append('-');
+                    sb.Append(StringUtility.Escape((char)ranges[i].Item2));
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static bool IsSingletonRange(Tuple<uint, uint>[] ranges) => ranges.Length == 1 && ranges[0].Item1 == ranges[0].Item2;
     }
 }

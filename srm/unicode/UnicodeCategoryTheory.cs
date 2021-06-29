@@ -1,16 +1,18 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Microsoft.SRM.Generated;
 
-namespace Microsoft.SRM
+namespace Microsoft.SRM.Unicode
 {
     /// <summary>
     /// Maps unicode categories to correspoing character predicates.
     /// </summary>
     /// <typeparam name="PRED">predicates</typeparam>
-    public interface IUnicodeCategoryTheory<PRED>
+    internal interface IUnicodeCategoryTheory<PRED>
     {
         /// <summary>
         /// Gets the unicode category condition for unicode category cat, that must be an integer between 0 and 29
@@ -32,10 +34,10 @@ namespace Microsoft.SRM
 
     internal class UnicodeCategoryTheory<PRED> : IUnicodeCategoryTheory<PRED>
     {
-        ICharAlgebra<PRED> solver;
-        PRED[] catConditions = new PRED[30];
-        PRED whiteSpaceCondition = default(PRED);
-        PRED wordLetterCondition = default(PRED);
+        internal ICharAlgebra<PRED> solver;
+        private PRED[] catConditions = new PRED[30];
+        private PRED whiteSpaceCondition;
+        private PRED wordLetterCondition;
 
         public string[] UnicodeCategoryStandardAbbreviations
         {
@@ -89,61 +91,6 @@ namespace Microsoft.SRM
         public UnicodeCategoryTheory(ICharAlgebra<PRED> solver)
         {
             this.solver = solver;
-            InitializeUnicodeCategoryDefinitions();
-        }
-
-        PRED MkRangesConstraint(IEnumerable<int[]> ranges)
-        {
-            PRED res = solver.False;
-            foreach (var range in ranges)
-                res = solver.MkOr(res, solver.MkRangeConstraint((char)range[0], (char)range[1]));
-            return res;
-        }
-
-        private void InitializeUnicodeCategoryDefinitions()
-        {
-            if (solver.Encoding == BitWidth.BV7)
-            {
-                //use ranges directly
-                for (int i = 0; i < 30; i++)
-                    if (UnicodeCategoryRanges.ASCII[i] == null)
-                        catConditions[i] = solver.False;
-                    else
-                        catConditions[i] = solver.MkCharPredicate(
-                              UnicodeCategoryPredicateName(i), MkRangesConstraint(UnicodeCategoryRanges.ASCII[i]));
-
-                whiteSpaceCondition = solver.MkCharPredicate(
-                              "IsWhitespace", MkRangesConstraint(UnicodeCategoryRanges.ASCIIWhitespace));
-                wordLetterCondition = solver.MkCharPredicate(
-                              "IsWordletter", MkRangesConstraint(UnicodeCategoryRanges.ASCIIWordCharacter));
-            }
-            else if (solver.Encoding == BitWidth.BV8)
-            {
-                //use BDDs
-                for (int i = 0; i < 30; i++)
-                    if (UnicodeCategoryRanges.CP437Bdd[i] == null)
-                        catConditions[i] = solver.False;
-                    else
-                        catConditions[i] = solver.MkCharPredicate(
-                              UnicodeCategoryPredicateName(i),
-                              solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.CP437Bdd[i])));
-                whiteSpaceCondition = solver.MkCharPredicate("IsWhitespace",
-                             solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.CP437WhitespaceBdd)));
-                wordLetterCondition = solver.MkCharPredicate("IsWordletter",
-                             solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.CP437WordCharacterBdd)));
-            }
-            else
-            {
-                //use BDDs
-                for (int i = 0; i < 30; i++)
-                    catConditions[i] = solver.MkCharPredicate(
-                         UnicodeCategoryPredicateName(i),
-                         solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.UnicodeBdd[i])));
-                whiteSpaceCondition = solver.MkCharPredicate("IsWhitespace",
-                             solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.UnicodeWhitespaceBdd)));
-                wordLetterCondition = solver.MkCharPredicate("IsWordletter",
-                             solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.UnicodeWordCharacterBdd)));
-            }
         }
 
         #region IUnicodeCategoryTheory<Expr> Members
@@ -152,30 +99,12 @@ namespace Microsoft.SRM
         {
             if (object.Equals(catConditions[i], default(PRED))) //uninitialized
             {
-                if (solver.Encoding == BitWidth.BV7)
-                {
-                    if (UnicodeCategoryRanges.ASCII[i] == null)
-                        catConditions[i] = solver.False;
-                    else
-                        catConditions[i] = solver.MkCharPredicate(
-                              UnicodeCategoryPredicateName(i), MkRangesConstraint(UnicodeCategoryRanges.ASCII[i]));
-                }
-                else if (solver.Encoding == BitWidth.BV8)
-                {
-                    //use BDDs
-                    if (UnicodeCategoryRanges.CP437Bdd[i] == null)
-                        catConditions[i] = solver.False;
-                    else
-                        catConditions[i] = solver.MkCharPredicate(
-                              UnicodeCategoryPredicateName(i),
-                              solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.CP437Bdd[i])));
-                }
-                else
-                {
-                    catConditions[i] = solver.MkCharPredicate(
-                         UnicodeCategoryPredicateName(i),
-                         solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.UnicodeBdd[i])));
-                }
+                BDD cat_i = BDD.Deserialize(UnicodeCategoryRanges.s_UnicodeCategoryBdd_repr[i], solver.CharSetProvider);
+                catConditions[i] =
+                     solver.ConvertFromCharSet(solver.CharSetProvider, cat_i);
+#if DEBUG
+                ValidateSerialization(catConditions[i]);
+#endif
             }
             return catConditions[i];
         }
@@ -185,25 +114,13 @@ namespace Microsoft.SRM
             get {
                 if (object.Equals(whiteSpaceCondition, default(PRED)))
                 {
-                    if (solver.Encoding == BitWidth.BV7)
-                    {
-                        whiteSpaceCondition = solver.MkCharPredicate(
-                                      "IsWhitespace", MkRangesConstraint(UnicodeCategoryRanges.ASCIIWhitespace));
-                    }
-                    else if (solver.Encoding == BitWidth.BV8)
-                    {
-                        //use BDDs
-                        whiteSpaceCondition = solver.MkCharPredicate("IsWhitespace",
-                                     solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.CP437WhitespaceBdd)));
-                    }
-                    else
-                    {
-                        //use BDDs
-                        whiteSpaceCondition = solver.MkCharPredicate("IsWhitespace",
-                                     solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.UnicodeWhitespaceBdd)));
-                    }
+                    var sBDD = BDD.Deserialize(UnicodeCategoryRanges.s_UnicodeWhitespaceBdd_repr, solver.CharSetProvider);
+                    whiteSpaceCondition = solver.ConvertFromCharSet(solver.CharSetProvider, sBDD);
+#if DEBUG
+                    ValidateSerialization(whiteSpaceCondition);
+#endif
                 }
-                return whiteSpaceCondition;    
+                return whiteSpaceCondition;
             }
         }
 
@@ -212,26 +129,25 @@ namespace Microsoft.SRM
             get {
                 if (object.Equals(wordLetterCondition, default(PRED)))
                 {
-                    if (solver.Encoding == BitWidth.BV7)
-                    {
-                        wordLetterCondition = solver.MkCharPredicate(
-                                      "IsWordletter", MkRangesConstraint(UnicodeCategoryRanges.ASCIIWordCharacter));
-                    }
-                    else if (solver.Encoding == BitWidth.BV8)
-                    {
-                        //use BDDs
-                        wordLetterCondition = solver.MkCharPredicate("IsWordletter",
-                                     solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.CP437WordCharacterBdd)));
-                    }
-                    else
-                    {
-                        //use BDDs
-                        wordLetterCondition = solver.MkCharPredicate("IsWordletter",
-                                     solver.ConvertFromCharSet(solver.CharSetProvider.DeserializeCompact(UnicodeCategoryRanges.UnicodeWordCharacterBdd)));
-                    }
+                    var wBDD = BDD.Deserialize(UnicodeCategoryRanges.s_UnicodeWordCharacterBdd_repr, solver.CharSetProvider);
+                    wordLetterCondition = solver.ConvertFromCharSet(solver.CharSetProvider, wBDD);
+#if DEBUG
+                    ValidateSerialization(wordLetterCondition);
+#endif
                 }
-                return wordLetterCondition; 
+                return wordLetterCondition;
             }
+        }
+
+        /// <summary>
+        /// Validate correctness of serialization/deserialization for the given predicate
+        /// </summary>
+        private void ValidateSerialization(PRED pred)
+        {
+            string s = solver.SerializePredicate(pred);
+            var psi = solver.DeserializePredicate(s);
+            if (!pred.Equals(psi))
+                throw new AutomataException(AutomataExceptionKind.BDDDeserializationError);
         }
 
         #endregion

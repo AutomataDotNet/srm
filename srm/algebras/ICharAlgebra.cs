@@ -1,4 +1,7 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -9,15 +12,14 @@ namespace Microsoft.SRM
     /// Extends ICharAlgebra with character predicate solving and predicate pretty printing.
     /// </summary>
     /// <typeparam name="PRED">predicates</typeparam>
-    public interface ICharAlgebra<PRED> : IBooleanAlgebra<PRED>
+    internal interface ICharAlgebra<PRED> : IBooleanAlgebra<PRED>
     {
-        BitWidth Encoding { get; }
-
         /// <summary>
-        /// Make a constraint describing the set of all characters between a (inclusive) and b (inclusive). 
-        /// Add both uppercase and lowercase elelements if caseInsensitive is true.
+        /// Make a constraint describing the set of all characters between a (inclusive) and b (inclusive).
+        /// Add both uppercase and lowercase elelements if caseInsensitive is true using the given culture
+        /// or the current culture when the given culture is null.
         /// </summary>
-        PRED MkRangeConstraint(char lower, char upper, bool caseInsensitive = false);
+        PRED MkRangeConstraint(char lower, char upper, bool caseInsensitive = false, string culture = null);
 
         /// <summary>
         /// Make a constraint describing a singleton set containing the character c, or
@@ -25,12 +27,13 @@ namespace Microsoft.SRM
         /// </summary>
         /// <param name="caseInsensitive">if true include both the uppercase and the lowercase versions of the given character</param>
         /// <param name="c">the given character</param>
-        PRED MkCharConstraint(char c, bool caseInsensitive = false);
+        /// <param name="culture">given culture, if null then the current culture is assumed</param>
+        PRED MkCharConstraint(char c, bool caseInsensitive = false, string culture = null);
 
         /// <summary>
         /// Make a term that encodes the given character set.
         /// </summary>
-        PRED ConvertFromCharSet(BDD set);
+        PRED ConvertFromCharSet(BDDAlgebra bddAlg, BDD set);
 
         /// <summary>
         /// Compute the number of elements in the set
@@ -46,7 +49,7 @@ namespace Microsoft.SRM
         /// <summary>
         /// Convert a predicate into a set of characters.
         /// </summary>
-        BDD ConvertToCharSet(BDDAlgebra solver, PRED pred);
+        BDD ConvertToCharSet(ICharAlgebra<BDD> bddalg, PRED pred);
 
         /// <summary>
         /// Gets the underlying character set solver.
@@ -54,18 +57,13 @@ namespace Microsoft.SRM
         CharSetSolver CharSetProvider { get; }
 
         /// <summary>
-        /// If named definitions are possible, 
-        /// makes a named definition of pred, as a unary relation symbol, 
-        /// such that, for all x, name(x) holds iff body(x) holds. Returns the 
-        /// atom name(x) that is equivalent to pred(x).
-        /// If named definitions are not supported, returns pred.
-        /// </summary>
-        PRED MkCharPredicate(string name, PRED pred);
-
-        /// <summary>
         /// Returns a partition of the full domain.
         /// </summary>
         PRED[] GetPartition();
+
+        /// <summary>
+        /// Pretty print the character predicate
+        /// </summary>
+        string PrettyPrint(PRED pred);
     }
 }
-

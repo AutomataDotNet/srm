@@ -45,6 +45,11 @@ namespace Microsoft.SRM
             return ourOptions.value;
         }
 
+        public static implicit operator RegexOptions(int value)
+        {
+            return new RegexOptions(value);
+        }
+
         public static implicit operator System.Text.RegularExpressions.RegexOptions(RegexOptions ourOptions)
         {
             var theirOptions = System.Text.RegularExpressions.RegexOptions.None;

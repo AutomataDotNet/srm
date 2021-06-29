@@ -1,4 +1,7 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -7,7 +10,7 @@ namespace Microsoft.SRM
     /// <summary>
     /// Exeption thrown by the automata constructions
     /// </summary>
-    public class AutomataException : Exception
+    internal class AutomataException : Exception
     {
         /// <summary>
         /// the kind of exception
@@ -81,7 +84,7 @@ namespace Microsoft.SRM
     /// <summary>
     /// Kinds of exceptions that may be thrown by the Automata library operations.
     /// </summary>
-    public enum AutomataExceptionKind
+    internal enum AutomataExceptionKind
     {
         UnrecognizedRegex,
         CharSetMustBeNonempty,
@@ -109,5 +112,6 @@ namespace Microsoft.SRM
         InternalError_SymbolicRegex,
         MustNotAcceptEmptyString,
         NrOfMintermsCanBeAtMost64,
+        SerializationError,
     }
 }

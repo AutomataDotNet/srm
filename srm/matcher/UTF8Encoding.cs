@@ -1,4 +1,7 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -10,7 +13,7 @@ namespace Microsoft.SRM
     /// <summary>
     /// Methods for decoding UTF8 encoded strings.
     /// </summary>
-    public static class UTF8Encoding
+    internal static class UTF8Encoding
     {
         /// <summary>
         /// Decode the next codepoint in the input.
@@ -21,7 +24,6 @@ namespace Microsoft.SRM
         /// <param name="i">position of the current start byte</param>
         /// <param name="step">how many bytes were consumed</param>
         /// <param name="codepoint">computed Unicode codepoint</param>
-        /// <returns></returns>
         internal static void DecodeNextNonASCII(byte[] input, int i, out int step, out int codepoint)
         {
             int b = input[i];
@@ -55,7 +57,7 @@ namespace Microsoft.SRM
         internal static ushort HighSurrogate(int codepoint)
         {
             //given codepoint = ((H - 0xD800) * 0x400) + (L - 0xDC00) + 0x10000
-            // compute H 
+            // compute H
             return (ushort)(((codepoint - 0x10000) >> 10) | 0xD800);
         }
 
@@ -63,7 +65,7 @@ namespace Microsoft.SRM
         internal static ushort LowSurrogate(int codepoint)
         {
             //given codepoint = ((H - 0xD800) * 0x400) + (L - 0xDC00) + 0x10000
-            //compute L 
+            //compute L
             var cp = (ushort)(((codepoint - 0x10000) & 0x3FF) | 0xDC00);
             return cp;
         }

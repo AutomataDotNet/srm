@@ -1,127 +1,36 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Numerics;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.IO;
+using System.Globalization;
+using System.Text;
 
 namespace Microsoft.SRM
 {
     /// <summary>
-    /// Wraps an instance of SymbolicRegex&lt;BV&gt;, the number of needed partition blocks is &gt; 64
-    /// </summary>
-    [Serializable]
-    public class SymbolicRegexBV : SymbolicRegex<BV>
-    {
-        private SymbolicRegexBV(SymbolicRegexBuilder<BV> builder, SymbolicRegexNode<BDD> sr,
-                                CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, RegexOptions options, int StateLimit, int startSetSizeLimit)
-            : base(srBuilder.Transform(sr, builder, builder.solver.ConvertFromCharSet),
-                  solver, minterms, options, StateLimit, startSetSizeLimit)
-        {
-        }
-
-        /// <summary>
-        /// Is called with minterms.Length at least 65
-        /// </summary>
-        internal SymbolicRegexBV(SymbolicRegexNode<BDD> sr,
-                                 CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, RegexOptions options, int StateLimit = 1000, int startSetSizeLimit = 1)
-            : this(new SymbolicRegexBuilder<BV>(BVAlgebra.Create(solver, minterms)), sr,
-                  solver, srBuilder, minterms, options, StateLimit, startSetSizeLimit)
-        {
-        }
-
-        /// <summary>
-        /// Invoked by deserializer
-        /// </summary>
-        public SymbolicRegexBV(SerializationInfo info, StreamingContext context) : base(info, context)
-        {
-        }
-    }
-
-    /// <summary>
-    /// Wraps an instance of SymbolicRegex&lt;ulong&gt;, the number of needed partition blocks is &lt; 65
-    /// </summary>
-    [Serializable]
-    public class SymbolicRegexUInt64 : SymbolicRegex<ulong>
-    {
-        private SymbolicRegexUInt64(SymbolicRegexBuilder<ulong> builder, SymbolicRegexNode<BDD> sr,
-                                CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, RegexOptions options, int StateLimit, int startSetSizeLimit)
-            : base(srBuilder.Transform(sr, builder, builder.solver.ConvertFromCharSet),
-                  solver, minterms, options, StateLimit, startSetSizeLimit)
-        {
-        }
-
-        /// <summary>
-        /// Is called with minterms.Length at most 64
-        /// </summary>
-        internal SymbolicRegexUInt64(SymbolicRegexNode<BDD> sr,
-                                 CharSetSolver solver, SymbolicRegexBuilder<BDD> srBuilder, BDD[] minterms, RegexOptions options, int StateLimit = 1000, int startSetSizeLimit = 1)
-            : this(new SymbolicRegexBuilder<ulong>(BV64Algebra.Create(solver, minterms)), sr,
-                  solver, srBuilder, minterms, options, StateLimit, startSetSizeLimit)
-        {
-        }
-
-        /// <summary>
-        /// Invoked by deserializer
-        /// </summary>
-        public SymbolicRegexUInt64(SerializationInfo info, StreamingContext context) : base(info, context)
-        {
-        }
-    }
-
-    /// <summary>
     /// Represents a precompiled form of a regex that implements match generation using symbolic derivatives.
     /// </summary>
     /// <typeparam name="S">character set type</typeparam>
-    [Serializable]
-    public class SymbolicRegex<S> : IMatcher, ISerializable
+    internal partial class SymbolicRegexMatcher<S> : IMatcher
     {
-        [NonSerialized]
         internal SymbolicRegexBuilder<S> builder;
 
         /// <summary>
         /// Partition of the input space of predicates.
         /// Length of atoms is K.
         /// </summary>
-        [NonSerialized]
-        S[] atoms;
+        private S[] atoms;
 
         /// <summary>
         /// Maps each character into a partition id in the range 0..K-1.
         /// </summary>
-        [NonSerialized]
-        DecisionTree dt;
-
-        /// <summary>
-        /// Used only by IsMatch and if A2 is used.
-        /// </summary>
-        [NonSerialized]
-        int q0_A2 = 0;
-
-        /// <summary>
-        /// Initial state of A1 (0 is not used).
-        /// </summary>
-        [NonSerialized]
-        int q0_A1 = 1;
-
-        /// <summary>
-        /// Initial state of Ar (0 is not used).
-        /// </summary>
-        [NonSerialized]
-        int q0_Ar = 2;
-
-        /// <summary>
-        /// Initial state of A (0 is not used).
-        /// </summary>
-        [NonSerialized]
-        int q0_A = 3;
-
-        /// <summary>
-        /// Next available state id.
-        /// </summary>
-        [NonSerialized]
-        int nextStateId = 4;
+        private Classifier dt;
 
 #if UNSAFE
         /// <summary>
@@ -138,772 +47,597 @@ namespace Microsoft.SRM
 #endif
 
         /// <summary>
-        /// First byte of A_prefixUTF8 in vector
-        /// </summary>
-        [NonSerialized]
-        Vector<byte> A_prefixUTF8_first_byte;
-
-        /// <summary>
         /// Original regex.
         /// </summary>
-        [NonSerialized]
         internal SymbolicRegexNode<S> A;
-        [NonSerialized]
-        bool A_allLoopsAreLazy = false;
-        [NonSerialized]
-        bool A_containsLazyLoop = false;
 
         /// <summary>
         /// The RegexOptions this regex was created with
         /// </summary>
-        public RegexOptions Options { get; set; }
+        internal System.Text.RegularExpressions.RegexOptions Options { get; set; }
 
         /// <summary>
-        /// Main pattern of the matcher
+        /// Timeout for matching.
         /// </summary>
-        public SymbolicRegexNode<S> Pattern
-        {
-            get
-            {
-                return this.A;
-            }
-        }
+        private TimeSpan _matchTimeout;
+        /// <summary>
+        /// corresponding timeout in ms
+        /// </summary>
+        private int _timeout;
+        private int _timeoutOccursAt;
+        private bool _checkTimeout;
 
         /// <summary>
-        /// Reverse pattern of the matcher
+        /// Set of elements that matter as first element of A.
         /// </summary>
-        public SymbolicRegexNode<S> ReversePattern
-        {
-            get
-            {
-                return this.Ar;
-            }
-        }
-
-        /// <summary>
-        /// Dot star in front of the pattern of the matcher
-        /// </summary>
-        public SymbolicRegexNode<S> DotStarPattern
-        {
-            get
-            {
-                return this.A1;
-            }
-        }
-
-        /// <summary>
-        /// Set of elements that matter as first element of A. 
-        /// </summary>
-        internal BooleanDecisionTree A_StartSet;
+        internal BooleanClassifier A_StartSet;
 
         /// <summary>
         /// predicate over characters that make some progress
         /// </summary>
-        S A_startset;
+        private S A_startset;
+
+        /// <summary>
+        /// maximum allowed size of A_startset_array
+        /// </summary>
+        private const int s_A_startset_array_max_size = 5;
+
+        /// <summary>
+        /// string of at most s_A_startset_array_max_size many characters
+        /// </summary>
+        private char[] A_startset_array;
 
         /// <summary>
         /// Number of elements in A_StartSet
         /// </summary>
-        int A_StartSet_Size;
+        private int A_StartSet_Size;
 
         /// <summary>
         /// if nonempty then A has that fixed prefix
         /// </summary>
-        string A_prefix;
+        private string A_prefix;
 
         /// <summary>
-        /// if nonempty then A has that fixed prefix
-        /// </summary>>
-        [NonSerialized]
-        byte[] A_prefixUTF8;
-
-        /// <summary>
-        /// predicate array corresponding to fixed prefix of A
+        /// non-null when A_prefix is nonempty
         /// </summary>
-        S[] A_prefix_array;
+        private System.Text.RegularExpressions.RegexBoyerMoore A_prefixBM;
+
+        ///// <summary>
+        ///// if nonempty then A has that fixed prefix
+        ///// </summary>>
+        //private byte[] A_prefixUTF8;
+
+        ///// <summary>
+        ///// predicate array corresponding to fixed prefix of A
+        ///// </summary>
+        //private S[] A_prefix_array;
 
         /// <summary>
         /// if true then the fixed prefix of A is idependent of case
         /// </summary>
-        [NonSerialized]
-        bool A_fixedPrefix_ignoreCase;
+        private bool A_fixedPrefix_ignoreCase;
 
         /// <summary>
-        /// precomputed state of A1 that is reached after the fixed prefix of A
+        /// Cached skip states from the initial state of A1 for the 6 possible previous character kinds.
         /// </summary>
-        [NonSerialized]
-        int A1_skipState;
+        private State<S>[] _A1_skipState = new State<S>[6];
 
-        /// <summary>
-        /// precomputed regex of A1 that is reached after the fixed prefix of A
-        /// </summary>
-        [NonSerialized]
-        SymbolicRegexNode<S> A1_skipStateRegex;
+        private State<S> GetA1_skipState(CharKindId prevCharKindId)
+        {
+            int id = (int)prevCharKindId;
+            if (_A1_skipState[id] == null)
+            {
+                var state = DeltaPlus(A_prefix, _A1q0[id]);
+                lock (this)
+                {
+                    if (_A1_skipState[id] == null)
+                        _A1_skipState[id] = state;
+                }
+            }
+            return _A1_skipState[id];
+        }
 
         /// <summary>
         /// Reverse(A).
         /// </summary>
-        [NonSerialized]
-        SymbolicRegexNode<S> Ar;
+        internal SymbolicRegexNode<S> Ar;
+
+        ///// <summary>
+        ///// if nonempty then Ar has that fixed prefix of predicates
+        ///// </summary>
+        //private S[] Ar_prefix_array;
+
+        private string Ar_prefix;
 
         /// <summary>
-        /// if nonempty then Ar has that fixed prefix of predicates
+        /// Cached skip states from the initial state of Ar for the 6 possible previous character kinds.
         /// </summary>
-        S[] Ar_prefix_array;
+        private State<S>[] _Ar_skipState = new State<S>[6];
 
-        string Ar_prefix;
-
-        /// <summary>
-        /// precomputed state that is reached after the fixed prefix of Ar
-        /// </summary>
-        [NonSerialized]
-        int Ar_skipState;
-
-        /// <summary>
-        /// precomputed regex that is reached after the fixed prefix of Ar
-        /// </summary>
-        [NonSerialized]
-        SymbolicRegexNode<S> Ar_skipStateRegex;
-
-        /// <summary>
-        /// .*A
-        /// </summary>
-        [NonSerialized]
-        SymbolicRegexNode<S> A1;
+        private State<S> GetAr_skipState(CharKindId prevCharKindId)
+        {
+            int id = (int)prevCharKindId;
+            if (_Ar_skipState[id] == null)
+            {
+                var state = DeltaPlus(Ar_prefix, _Arq0[id]);
+                lock (this)
+                {
+                    if (_Ar_skipState[id] == null)
+                        _Ar_skipState[id] = state;
+                }
+            }
+            return _Ar_skipState[id];
+        }
 
         /// <summary>
-        /// Variant of A1 for matching.
-        /// In A2 anchors have been removed. 
-        /// Used only by IsMatch and when A contains anchors.
+        /// .*A start regex
         /// </summary>
-        [NonSerialized]
-        SymbolicRegexNode<S> A2 = null;
+        internal SymbolicRegexNode<S> A1;
+
+        private State<S>[] _Aq0 = new State<S>[6];
+
+        private State<S>[] _A1q0 = new State<S>[6];
+
+        private State<S>[] _Arq0 = new State<S>[6];
+
+        private CharKindId[] _asciiCharKindId = new CharKindId[128];
 
         /// <summary>
-        /// Initialized to atoms.Length.
+        /// Initialized to the next power of 2 that is at least the number of atoms
         /// </summary>
-        [NonSerialized]
-        int K;
+        private int K;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal State<S> GetState(int stateId)
+        {
+            // the builder maintains a mapping
+            // from stateIds to states
+            return builder.statearray[stateId];
+        }
 
         /// <summary>
-        /// Maps regexes to state ids
+        /// Get the atom of character c
         /// </summary>
-        [NonSerialized]
-        Dictionary<SymbolicRegexNode<S>, int> regex2state = new Dictionary<SymbolicRegexNode<S>, int>();
+        /// <param name="c">character code</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private S GetAtom(int c) => atoms[dt.Find(c)];
 
         /// <summary>
-        /// Maps states >= StateLimit to regexes.
+        /// Initial bound (1024) on the nr of states stored in delta.
+        /// This value may become larger dynamically if more that 1024 states are generated.
         /// </summary>
-        [NonSerialized]
-        Dictionary<int, SymbolicRegexNode<S>> state2regexExtra = new Dictionary<int, SymbolicRegexNode<S>>();
-
-        /// <summary>
-        /// Maps states 1..(StateLimit-1) to regexes. 
-        /// State 0 is not used but is reserved for denoting UNDEFINED value.
-        /// Length of state2regex is StateLimit. Entry 0 is not used.
-        /// </summary>
-        [NonSerialized]
-        SymbolicRegexNode<S>[] state2regex;
-
-        /// <summary>
-        /// Overflow from delta. Transitions with source state over the limit.
-        /// Each entry (q, [p_0...p_n]) has n = atoms.Length-1 and represents the transitions q --atoms[i]--> p_i.
-        /// All defined states are strictly positive, p_i==0 means that q --atoms[i]--> p_i is still undefined.
-        /// </summary>
-        [NonSerialized]
-        Dictionary<int, int[]> deltaExtra = new Dictionary<int, int[]>();
-
-        /// <summary>
-        /// Bound on the maximum nr of states stored in array.
-        /// </summary>
-        internal readonly int StateLimit;
+        internal int StateLimit = 1024;
 
         /// <summary>
         /// Bound on the maximum nr of chars that trigger vectorized IndexOf.
         /// </summary>
-        internal readonly int StartSetSizeLimit;
+        internal readonly int StartSetSizeLimit = 1;
 
         /// <summary>
-        /// Holds all transitions for states 1..MaxNrOfStates-1.
-        /// each transition q ---atoms[i]---> p is represented by entry p = delta[(q * K) + i]. 
-        /// Length of delta is K*StateLimit.
+        /// Holds all transitions for states 0..MaxNrOfStates-1.
+        /// each transition q ---atoms[i]---> p is represented by entry p = delta[(q * K) + i].
+        /// Length of delta is K*StateLimit. Entry delta[i]=null means that the state is still undefined.
         /// </summary>
-        [NonSerialized]
-        int[] delta;
+        private State<S>[] delta;
 
+        #region custom serialization/deserialization
         /// <summary>
-        /// Lookup table for border-symbol transitions
-        /// [startline,endline,start,end]
+        /// Append the custom format of this matcher into sb. All characters are in visible ASCII.
+        /// Main fragments are separated by a custom separator character not used in any individual fragment.
         /// </summary>
-        [NonSerialized]
-        Dictionary<int, int[]> deltaForBorderSymbols = new Dictionary<int, int[]>();
-
-        #region custom serialization
-
-        [NonSerialized]
-        internal bool serializeInSimplifiedForm = false;
-        /// <summary>
-        /// This serialization method is invoked by BinaryFormatter.Serialize via Serialize method.
-        /// </summary>
-        public void GetObjectData(SerializationInfo info, StreamingContext context)
+        public void Serialize(StringBuilder sb)
         {
-            if (serializeInSimplifiedForm)
+            //-----------------------------------0
+            sb.Append(_culture.Name);
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------1
+            this.builder.solver.Serialize(sb);
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------2
+            A.Serialize(sb);
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------3
+            sb.Append(Base64.Encode((int)Options));
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------4
+            sb.Append(builder.solver.SerializePredicate(builder.wordLetterPredicate));
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------5
+            sb.Append(builder.solver.SerializePredicate(builder.newLinePredicate));
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------6
+            sb.Append(builder.solver.SerializePredicate(A_startset));
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------7
+            A_StartSet.Serialize(sb);
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------8
+            sb.Append(Base64.Encode(A_StartSet_Size));
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------9
+            Base64.Encode(A_startset_array, sb);
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------10
+            Base64.Encode(A_prefix, sb);
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------11
+            sb.Append(A_fixedPrefix_ignoreCase);
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------12
+            Base64.Encode(Ar_prefix, sb);
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------13
+            dt.Serialize(sb);
+            sb.Append(Regex.s_top_level_separator);
+            //-----------------------------------14
+            if (_checkTimeout)
+                sb.Append(_matchTimeout.ToString());
+        }
+
+        /// <summary>
+        /// Invoked by Regex.Deserialize
+        /// </summary>
+        internal SymbolicRegexMatcher(ICharAlgebra<S> solver, string[] fragments)
+        {
+            //deserialize the components in the same order they were serialized
+            //fragments[1] contains info that was used to construct the solver
+            _culture = (fragments[0] == string.Empty ? CultureInfo.InvariantCulture :
+                (fragments[0] == CultureInfo.CurrentCulture.Name ? CultureInfo.CurrentCulture : new CultureInfo(fragments[0])));
+            builder = new SymbolicRegexBuilder<S>(solver);
+            atoms = solver.GetPartition();
+            A = builder.Deserialize(fragments[2]);
+            Options = (RegexOptions)Base64.DecodeInt(fragments[3]);
+            //these predicates are relevant only when anchors are used
+            builder.wordLetterPredicate = builder.solver.DeserializePredicate(fragments[4]);
+            builder.newLinePredicate = builder.solver.DeserializePredicate(fragments[5]);
+            A_startset = builder.solver.DeserializePredicate(fragments[6]);
+            A_StartSet = BooleanClassifier.Deserialize(fragments[7]);
+            A_StartSet_Size = Base64.DecodeInt(fragments[8]);
+            A_startset_array = Base64.DecodeCharArray(fragments[9]);
+            A_prefix = Base64.DecodeString(fragments[10]);
+            A_fixedPrefix_ignoreCase = bool.Parse(fragments[11]);
+            Ar_prefix = Base64.DecodeString(fragments[12]);
+            dt = Classifier.Deserialize(fragments[13]);
+            string potentialTimeout = fragments[14].TrimEnd();
+            if (potentialTimeout == string.Empty)
             {
-                #region special case for replacing all character classes with a single character
-                BV64Algebra bvalg = this.builder.solver as BV64Algebra;
-                if (bvalg == null)
-                    throw new NotSupportedException("Simplified serialization is only supported for BV64Algebra");
-                var simpl_bvalg = bvalg.ReplaceMintermsWithVisibleCharacters();
-
-                info.AddValue("solver", simpl_bvalg);
-                info.AddValue("A", A.Serialize());
-                info.AddValue("Options", (object)Options);
-
-                info.AddValue("StateLimit", StateLimit);
-                info.AddValue("StartSetSizeLimit", StartSetSizeLimit);
-
-                ulong A_startset_ulong = (ulong)(object)A_startset;
-
-                var simpl_precomputed = Array.ConvertAll(simpl_bvalg.dtree.precomputed, atomId => simpl_bvalg.IsSatisfiable(simpl_bvalg.MkAnd(simpl_bvalg.atoms[atomId], A_startset_ulong)));
-                BooleanDecisionTree simpl_A_StartSet;
-                if (simpl_bvalg.IsSatisfiable(simpl_bvalg.MkAnd(simpl_bvalg.atoms[0], A_startset_ulong)))
-                    simpl_A_StartSet = new BooleanDecisionTree(simpl_precomputed, new DecisionTree.BST(1, null, null));
-                else
-                    simpl_A_StartSet = new BooleanDecisionTree(simpl_precomputed, new DecisionTree.BST(0, null, null));
-                var simpl_A_StartSet_Size = simpl_bvalg.ComputeDomainSize(A_startset_ulong);
-
-                info.AddValue("A_StartSet", simpl_A_StartSet);
-                info.AddValue("A_startset", A_startset_ulong);
-                info.AddValue("A_StartSet_Size", simpl_A_StartSet_Size);
-
-                var simpl_A_prefix = "";
-
-                for (int i = 0; i < A_prefix_array.Length; i++)
-                {
-                    ulong set = (ulong)(object)A_prefix_array[i];
-                    ulong size = simpl_bvalg.ComputeDomainSize(set);
-                    if (size > 1)
-                        break;
-                    else
-                        simpl_A_prefix += simpl_bvalg.PrettyPrint(set);
-                }
-
-                info.AddValue("A_prefix", StringUtility.SerializeStringToCharCodeSequence(simpl_A_prefix));
-                info.AddValue("A_fixedPrefix_ignoreCase", false);
-                info.AddValue("A_prefix_array", A_prefix_array);
-
-                var simpl_Ar_prefix = "";
-
-                for (int i = 0; i < Ar_prefix_array.Length; i++)
-                {
-                    ulong set = (ulong)(object)Ar_prefix_array[i];
-                    ulong size = simpl_bvalg.ComputeDomainSize(set);
-                    if (size > 1)
-                        break;
-                    else
-                        simpl_Ar_prefix += simpl_bvalg.PrettyPrint(set);
-                }
-
-                info.AddValue("Ar_prefix_array", Ar_prefix_array);
-                info.AddValue("Ar_prefix", StringUtility.SerializeStringToCharCodeSequence(simpl_Ar_prefix));
-                #endregion
+                _matchTimeout = System.Text.RegularExpressions.Regex.InfiniteMatchTimeout;
+                _checkTimeout = false;
             }
             else
             {
-                info.AddValue("solver", this.builder.solver);
-                info.AddValue("A", A.Serialize());
-                info.AddValue("Options", (object)Options);
-
-                info.AddValue("StateLimit", StateLimit);
-                info.AddValue("StartSetSizeLimit", StartSetSizeLimit);
-
-                info.AddValue("A_StartSet", A_StartSet);
-                info.AddValue("A_startset", A_startset);
-                info.AddValue("A_StartSet_Size", A_StartSet_Size);
-
-                info.AddValue("A_prefix", StringUtility.SerializeStringToCharCodeSequence(A_prefix));
-                info.AddValue("A_fixedPrefix_ignoreCase", A_fixedPrefix_ignoreCase);
-                info.AddValue("A_prefix_array", A_prefix_array);
-
-                info.AddValue("Ar_prefix_array", Ar_prefix_array);
-                info.AddValue("Ar_prefix", StringUtility.SerializeStringToCharCodeSequence(Ar_prefix));
+                _matchTimeout = TimeSpan.Parse(potentialTimeout);
+                _checkTimeout = true;
+                _timeout = (int)(_matchTimeout.TotalMilliseconds + 0.5); // Round up, so it will at least 1ms;
+                _timeoutChecksToSkip = TimeoutCheckFrequency;
             }
-        }
-
-        /// <summary>
-        /// This deserialization constructor is invoked by IFormatter.Deserialize via Deserialize method
-        /// </summary>
-        public SymbolicRegex(SerializationInfo info, StreamingContext context)
-        {
-            this.Options = (RegexOptions)info.GetValue("Options", typeof(RegexOptions));
-
-            var solver = (ICharAlgebra<S>)info.GetValue("solver", typeof(ICharAlgebra<S>));
-            this.builder = new SymbolicRegexBuilder<S>(solver);
-
-            this.atoms = builder.solver.GetPartition();
-            this.dt = ((BVAlgebraBase)builder.solver).dtree;
-
-            A = builder.Deserialize(info.GetString("A"));
-            this.StateLimit = info.GetInt32("StateLimit");
-            this.StartSetSizeLimit = info.GetInt32("StartSetSizeLimit");
-
+            if (A.info.ContainsSomeAnchor)
+            {
+                //line anchors are being used when builder.newLinePredicate is different from False
+                if (!builder.newLinePredicate.Equals(builder.solver.False))
+                    _asciiCharKindId[10] = CharKindId.Newline;
+                //word boundary is being used when builder.wordLetterPredicate is different from False
+                if (!builder.wordLetterPredicate.Equals(builder.solver.False))
+                {
+                    _asciiCharKindId['_'] = CharKindId.WordLetter;
+                    for (char i = '0'; i <= '9'; i++)
+                        _asciiCharKindId[i] = CharKindId.WordLetter;
+                    for (char i = 'A'; i <= 'Z'; i++)
+                        _asciiCharKindId[i] = CharKindId.WordLetter;
+                    for (char i = 'a'; i <= 'z'; i++)
+                        _asciiCharKindId[i] = CharKindId.WordLetter;
+                }
+            }
             InitializeRegexes();
-
-            this.A_startset = A.GetStartSet(builder.solver);
-            this.A_StartSet_Size = (int)builder.solver.ComputeDomainSize(A_startset);
-
-            this.A_StartSet = (BooleanDecisionTree)info.GetValue("A_StartSet", typeof(BooleanDecisionTree));
-            this.A_startset = (S)info.GetValue("A_startset", typeof(S));
-            this.A_StartSet_Size = info.GetInt32("A_StartSet_Size");
-
-            SymbolicRegexNode<S> tmp = A;
-            this.A_prefix_array = info.GetValue("A_prefix_array", typeof(S[])) as S[];
-            this.A_prefix = StringUtility.DeserializeStringFromCharCodeSequence(info.GetString("A_prefix"));
-            this.A_prefixUTF8 = System.Text.UnicodeEncoding.UTF8.GetBytes(this.A_prefix);
-
-            this.A_fixedPrefix_ignoreCase = info.GetBoolean("A_fixedPrefix_ignoreCase");
-            this.A1_skipState = DeltaPlus(A_prefix, q0_A1, out tmp);
-            this.A1_skipStateRegex = tmp;
-
-            this.Ar_prefix_array = (S[])info.GetValue("Ar_prefix_array", typeof(S[]));
-            this.Ar_prefix = StringUtility.DeserializeStringFromCharCodeSequence(info.GetString("Ar_prefix"));
-            this.Ar_skipState = DeltaPlus(Ar_prefix, q0_Ar, out tmp);
-            this.Ar_skipStateRegex = tmp;
-
-            InitializeVectors();
+            InitializePrefixBoyerMoore();
         }
-
-        /// <summary>
-        /// Parse a symbolic regex from its serialized form.
-        /// </summary>
-        /// <param name="symbolicregex">serialized form of a symbolic regex</param>
-        public SymbolicRegexNode<S> Parse(string symbolicregex)
-        {
-            return builder.Deserialize(symbolicregex);
-        }
-
         #endregion
+
+        internal CultureInfo _culture;
 
         /// <summary>
         /// Constructs matcher for given symbolic regex
         /// </summary>
-        internal SymbolicRegex(SymbolicRegexNode<S> sr, CharSetSolver css, BDD[] minterms, RegexOptions options, int StateLimit = 1000, int startSetSizeLimit = 128)
+        internal SymbolicRegexMatcher(SymbolicRegexNode<S> sr, CharSetSolver css, BDD[] minterms, RegexOptions options, TimeSpan matchTimeout, CultureInfo culture)
         {
+            _culture = culture;
+            if (sr.IsNullable)
+                throw new NotSupportedException(SRM.Regex._DFA_incompatible_with + "nullable regex (accepting the empty string)");
+
+            _matchTimeout = matchTimeout;
+            _checkTimeout = (System.Text.RegularExpressions.Regex.InfiniteMatchTimeout != _matchTimeout);
+            _timeout = (int)(matchTimeout.TotalMilliseconds + 0.5); // Round up, so it will at least 1ms;
+            _timeoutChecksToSkip = TimeoutCheckFrequency;
+
             this.Options = options;
-            this.StartSetSizeLimit = startSetSizeLimit;
+            this.StartSetSizeLimit = 1;
             this.builder = sr.builder;
-            this.StateLimit = StateLimit;
             if (builder.solver is BV64Algebra)
             {
                 BV64Algebra bva = builder.solver as BV64Algebra;
-                atoms = bva.atoms as S[];
-                dt = bva.dtree;
+                atoms = bva.GetPartition() as S[];
+                dt = bva._classifier;
             }
             else if (builder.solver is BVAlgebra)
             {
                 BVAlgebra bva = builder.solver as BVAlgebra;
                 atoms = bva.atoms as S[];
-                dt = bva.dtree;
+                dt = bva._classifier;
             }
             else if (builder.solver is CharSetSolver)
             {
                 atoms = minterms as S[];
-                dt = DecisionTree.Create(builder.solver as CharSetSolver, minterms);
+                dt = Classifier.Create(builder.solver as CharSetSolver, minterms);
             }
             else
             {
-                throw new NotSupportedException(string.Format("only {0} or {1} or {2} algebra is supported", typeof(BV64Algebra), typeof(BVAlgebra), typeof(CharSetSolver)));
+                throw new NotSupportedException($"only {nameof(BV64Algebra)} or {nameof(BVAlgebra)} or {nameof(CharSetSolver)} algebra is supported");
             }
 
             this.A = sr;
 
             InitializeRegexes();
 
-            A_startset = A.GetStartSet(builder.solver);
+            A_startset = A.GetStartSet();
             this.A_StartSet_Size = (int)builder.solver.ComputeDomainSize(A_startset);
-            this.A_StartSet = BooleanDecisionTree.Create(css, builder.solver.ConvertToCharSet(css, A_startset));
 
-            SymbolicRegexNode<S> tmp = A;
-            this.A_prefix_array = A.GetPrefix();
+
+#if DEBUG
+            if (this.A_StartSet_Size == 0)
+                throw new NotSupportedException(SRM.Regex._DFA_incompatible_with + "characterless regex");
+#endif
+            var startbdd = builder.solver.ConvertToCharSet(css, A_startset);
+            this.A_StartSet = BooleanClassifier.Create(css, startbdd);
+            //store the start characters in the A_startset_array if there are not too many characters
+            if (this.A_StartSet_Size <= s_A_startset_array_max_size)
+                this.A_startset_array = new List<char>(css.GenerateAllCharacters(startbdd)).ToArray();
+            else
+                this.A_startset_array = Array.Empty<char>();
+
             this.A_prefix = A.GetFixedPrefix(css, out this.A_fixedPrefix_ignoreCase);
-            this.A_prefixUTF8 = System.Text.UnicodeEncoding.UTF8.GetBytes(this.A_prefix);
+            this.Ar_prefix = Ar.GetFixedPrefix(css, out _);
 
-            this.A1_skipState = DeltaPlus(A_prefix, q0_A1, out tmp);
-            this.A1_skipStateRegex = tmp;
+            InitializePrefixBoyerMoore();
 
-            this.Ar_prefix_array = Ar.GetPrefix();
-            this.Ar_prefix = new string(Array.ConvertAll(this.Ar_prefix_array, x => (char)css.GetMin(builder.solver.ConvertToCharSet(css, x))));
-            this.Ar_skipState = DeltaPlus(Ar_prefix, q0_Ar, out tmp);
-            this.Ar_skipStateRegex = tmp;
+            if (A.info.ContainsSomeAnchor)
+                for (int i = 0; i < 128; i++)
+                    _asciiCharKindId[i] =
+                        i == 10 ? (builder.solver.MkAnd(GetAtom(i), builder.newLinePredicate).Equals(builder.solver.False) ? CharKindId.None : CharKindId.Newline)
+                                : (builder.solver.MkAnd(GetAtom(i), builder.wordLetterPredicate).Equals(builder.solver.False) ? CharKindId.None : CharKindId.WordLetter);
+        }
 
-            InitializeVectors();
+        private void InitializePrefixBoyerMoore()
+        {
+            if (this.A_prefix != string.Empty && this.A_prefix.Length <= System.Text.RegularExpressions.RegexBoyerMoore.MaxLimit)
+            {
+                string prefix = this.A_prefix;
+                // RegexBoyerMoore expects the prefix to be lower case when case is ignored
+                if (this.A_fixedPrefix_ignoreCase)
+                    //use the culture of the matcher
+                    prefix = this.A_prefix.ToLower(_culture);
+                this.A_prefixBM = new System.Text.RegularExpressions.RegexBoyerMoore(prefix, this.A_fixedPrefix_ignoreCase, false, _culture);
+            }
         }
 
         private void InitializeRegexes()
         {
-            this.A_allLoopsAreLazy = this.A.CheckIfAllLoopsAreLazy();
-            this.A_containsLazyLoop = this.A.CheckIfContainsLazyLoop();
-            this.Ar = this.A.Reverse();
-            this.A1 = this.builder.MkConcat(this.builder.dotStar, this.A);
-            this.regex2state[A1] = this.q0_A1;
-            this.regex2state[Ar] = this.q0_Ar;
-            this.regex2state[A] = this.q0_A;
-            this.K = this.atoms.Length;
-            this.delta = new int[this.K * this.StateLimit];
-            this.state2regex = new SymbolicRegexNode<S>[this.StateLimit];
-            if (this.q0_A1 < this.StateLimit)
+            A1 = builder.MkConcat(builder.dotStar, A);
+            Ar = A.Reverse();
+            // let K be the smallest k s.t. 2^k >= atoms.Length + 1
+            // the extra slot with id atoms.Length is reserved for \Z (last occurrence of \n)
+            int k = 1;
+            while (atoms.Length >= (1 << k)) k += 1;
+            K = k;
+            // initialize state lookup table
+            StateLimit = this.builder.statearray.Length;
+            delta = new State<S>[StateLimit << K];
+            // create initial states for A, A1 and Ar
+            if (!A.info.ContainsSomeAnchor)
             {
-                this.state2regex[this.q0_A1] = this.A1;
+                // only the default previous character kind None(0) is ever going to be used for all initial states
+                _Aq0[(int)CharKindId.None] = State<S>.MkState(A, CharKindId.None, false);
+                _A1q0[(int)CharKindId.None] = State<S>.MkState(A1, CharKindId.None, false);
+                // _A1q0[0] is recognized as special initial state,
+                // this information is used for search optimization based on start set and prefix of A
+                _A1q0[(int)CharKindId.None].isInitialState = true;
+                // do not mark states of Ar as reverse because this info is irrelevant when no anchors are used
+                _Arq0[(int)CharKindId.None] = State<S>.MkState(Ar, CharKindId.None, false);
             }
             else
             {
-                this.state2regexExtra[this.q0_A1] = this.A1;
-                this.deltaExtra[this.q0_A1] = new int[this.K];
-            }
-
-            if (this.q0_Ar < this.StateLimit)
-            {
-                this.state2regex[this.q0_Ar] = this.Ar;
-            }
-            else
-            {
-                this.state2regexExtra[this.q0_Ar] = this.Ar;
-                this.deltaExtra[this.q0_Ar] = new int[this.K];
-            }
-
-            if (this.q0_A < this.StateLimit)
-            {
-                this.state2regex[this.q0_A] = this.A;
-            }
-            else
-            {
-                this.state2regexExtra[this.q0_A] = this.A;
-                this.deltaExtra[this.q0_A] = new int[this.K];
-            }
-        }
-
-        private void InitializeVectors()
-        {
-#if UNSAFE
-            if (A_StartSet_Size <= StartSetSizeLimit)
-            {
-                char[] startchars = new List<char>(builder.solver.GenerateAllCharacters(A_startset)).ToArray();
-                A_StartSet_Vec = Array.ConvertAll(startchars, c => new Vector<ushort>(c));
-                A_StartSet_singleton = (ushort)startchars[0];
-            }
-#endif
-
-            if (this.A_prefix != string.Empty)
-            {
-                this.A_prefixUTF8_first_byte = new Vector<byte>(this.A_prefixUTF8[0]);
-            }
-        }
-
-        /// <summary>
-        /// Return the state after the given input.
-        /// </summary>
-        /// <param name="input">given input</param>
-        /// <param name="q">given start state</param>
-        /// <param name="regex">regex of returned state</param>
-        int DeltaPlus(string input, int q, out SymbolicRegexNode<S> regex)
-        {
-            if (string.IsNullOrEmpty(input))
-            {
-                regex = (q < StateLimit ? state2regex[q] : state2regexExtra[q]);
-                return q;
-            }
-            else
-            {
-                q = DeltaBorder(BorderSymbol.Beg, q, out _);
-
-                for (int i = 0; i < input.Length; i++)
+                for (int i = 0; i < 6; i++)
                 {
-                    var c = input[i];
-
-                    int p;
-                    if (c == 10)
+                    var kind = (CharKindId)i;
+                    if (kind == CharKindId.Start)
                     {
-                        p = DeltaBorder(BorderSymbol.EOL, q, out _);
-                        p = Delta(10, p, out _);
-                        p = DeltaBorder(BorderSymbol.BOL, p, out _);
+                        _Aq0[i] = State<S>.MkState(A, kind, false);
+                        _A1q0[i] = State<S>.MkState(A1, kind, false);
                     }
                     else
-                        p = Delta(c, q, out _);
-
-                    q = p;
+                    {
+                        _Aq0[i] = State<S>.MkState(A.ReplaceStartAnchorByBottom(), kind, false);
+                        _A1q0[i] = State<S>.MkState(A1.ReplaceStartAnchorByBottom(), kind, false);
+                    }
+                    //don't create reverse-mode states unless some line-anchor is used somewhere
+                    //boundary anchors \b and \B are commutative and thus preserved in reverse
+                    _Arq0[i] = State<S>.MkState(Ar, kind, A.info.ContainsLineAnchor ? true : false);
+                    //used to detect if initial state was reentered, then startset can be triggered
+                    //but observe that the behavior from the state may ultimately depend on the previous
+                    //input char e.g. possibly causing nullability of \b or \B or of a start-of-line anchor,
+                    //in that sense there can be several "versions" (not more than 6) of the initial state
+                    _A1q0[i].isInitialState = true;
                 }
-                regex = (q < StateLimit ? state2regex[q] : state2regexExtra[q]);
-                return q;
             }
         }
 
+//        private void InitializeVectors()
+//        {
+//#if UNSAFE
+//            if (A_StartSet_Size > 0 && A_StartSet_Size <= StartSetSizeLimit)
+//            {
+//                char[] startchars = new List<char>(builder.solver.GenerateAllCharacters(A_startset)).ToArray();
+//                A_StartSet_Vec = Array.ConvertAll(startchars, c => new Vector<ushort>(c));
+//                A_StartSet_singleton = (ushort)startchars[0];
+//            }
+//#endif
+
+//            if (this.A_prefix != string.Empty)
+//            {
+//                this.A_prefixUTF8_first_byte = new Vector<byte>(this.A_prefixUTF8[0]);
+//            }
+//        }
+
         /// <summary>
-        /// Compute the target state for source state q and input character c.
-        /// All uses of Delta must be inlined for efficiency. 
+        /// Return the state after the given input string from the given state q.
+        /// </summary>
+        private State<S> DeltaPlus(string input, State<S> q)
+        {
+            for (int i = 0; i < input.Length; i++)
+                q = Delta(input, i, q);
+            return q;
+        }
+
+        /// <summary>
+        /// Compute the target state for source state q and input[i] character.
+        /// All uses of Delta must be inlined for efficiency.
         /// This is the purpose of the MethodImpl(MethodImplOptions.AggressiveInlining) attribute.
         /// </summary>
-        /// <param name="c">input character</param>
-        /// <param name="q">state id of source regex</param>
-        /// <param name="regex">target regex</param>
-        /// <returns>state id of target regex</returns>
+        /// <param name="input">input string</param>
+        /// <param name="i">refers to i'th character in the input</param>
+        /// <param name="q">source state</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        int Delta(int c, int q, out SymbolicRegexNode<S> regex)
+        private State<S> Delta(string input, int i, State<S> q)
         {
-            int p;
-            #region cut-n-paste for explcit inlining
-            int atom_id = (dt.precomputed.Length > c ? dt.precomputed[c] : dt.bst.Find(c));
-            S atom = atoms[atom_id];
-            if (q < StateLimit)
-            {
-                #region use delta
-                int offset = (q * K) + atom_id;
-                p = delta[offset];
-                if (p == 0)
-                {
-                    CreateNewTransition(q, atom, offset, out p, out regex);
-                }
-                else
-                {
-                    regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                }
-                #endregion
-            }
+            int c = input[i];
+            // atom_id = atoms.Length represents \Z (last \n)
+            int atom_id = (c == 10 && i == input.Length - 1 && q.Node.info.StartsWithLineAnchor ? atoms.Length : dt.Find(c));
+            int offset = (q.Id << K) | atom_id;
+            var p = delta[offset];
+            if (p == null)
+                //transition atom False means that this is \Z
+                return CreateNewTransition(q, atom_id == atoms.Length ? builder.solver.False : atoms[atom_id], offset);
             else
-            {
-                #region use deltaExtra
-                int[] q_trans = deltaExtra[q];
-                p = q_trans[atom_id];
-                if (p == 0)
-                {
-                    CreateNewTransitionExtra(q, atom_id, atom, q_trans, out p, out regex);
-                }
-                else
-                {
-                    regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-                }
-                #endregion
-            }
-            #endregion
-            return p;
-        }
-
-        /// <summary>
-        /// Compute the target state for source state q and borderSymbol.
-        /// </summary>
-        /// <param name="borderSymbol">input border symbol</param>
-        /// <param name="q">state id of source regex</param>
-        /// <param name="regex">target regex</param>
-        /// <returns>state id of target regex</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        int DeltaBorder(BorderSymbol borderSymbol, int q, out SymbolicRegexNode<S> regex)
-        {
-            int p;
-            int borderSymbolId = (int)borderSymbol;
-            if (deltaForBorderSymbols.TryGetValue(q, out int[] targets) && targets[borderSymbolId] > 0)
-            {
-                p = targets[borderSymbolId];
-                regex = (p < StateLimit ? state2regex[p] : state2regexExtra[p]);
-            }
-            else
-            {
-                CreateNewTransitionForBorderSymbol(q, borderSymbol, out p, out regex);
-            }
-            return p;
-        }
-
-        /// <summary>
-        /// Critical region for threadsafe applications for defining a new transition from q when q is larger that StateLimit
-        /// </summary>
-        /// 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CreateNewTransitionExtra(int q, int atom_id, S atom, int[] q_trans, out int p, out SymbolicRegexNode<S> regex)
-        {
-            lock (this)
-            {
-                //check if meanwhile q_trans[atom_id] has become defined possibly by another thread
-                int p1 = q_trans[atom_id];
-                if (p1 != 0)
-                {
-                    p = p1;
-                    if (p1 < StateLimit)
-                        regex = state2regex[p1];
-                    else
-                        regex = state2regexExtra[p1];
-                }
-                else
-                {
-                    //p is still undefined
-                    var q_regex = state2regexExtra[q];
-                    var deriv = q_regex.MkDerivative(atom);
-                    if (!regex2state.TryGetValue(deriv, out p))
-                    {
-                        p = nextStateId++;
-                        regex2state[deriv] = p;
-                        // we know at this point that p >= MaxNrOfStates
-                        state2regexExtra[p] = deriv;
-                        deltaExtra[p] = new int[K];
-                    }
-                    q_trans[atom_id] = p;
-                    regex = deriv;
-                }
-            }
+                return p;
         }
 
         /// <summary>
         /// Critical region for threadsafe applications for defining a new transition
         /// </summary>
-        //[MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CreateNewTransition(int q, S atom, int offset, out int p, out SymbolicRegexNode<S> regex)
+        private State<S> CreateNewTransition(State<S> q, S atom, int offset)
         {
             lock (this)
             {
-                //check if meanwhile delta[offset] has become defined possibly by another thread
-                int p1 = delta[offset];
-                if (p1 != 0)
-                {
-                    p = p1;
-                    if (p1 < StateLimit)
-                        regex = state2regex[p1];
-                    else
-                        regex = state2regexExtra[p1];
-                }
+                // check if meanwhile delta[offset] has become defined possibly by another thread
+                State<S> p = delta[offset];
+                if (p != null)
+                    return p;
                 else
                 {
-                    var q_regex = state2regex[q];
-                    var deriv = q_regex.MkDerivative(atom);
-                    if (!regex2state.TryGetValue(deriv, out p))
+                    // this is the only place in code where the Next method is called
+                    p = q.Next(atom);
+                    // if the statearray was extended then delta must be extended accordingly
+#if DEBUG
+                    if (StateLimit > builder.statearray.Length)
+                        throw new AutomataException(AutomataExceptionKind.InternalError_SymbolicRegex);
+#endif
+                    if (StateLimit < builder.statearray.Length)
                     {
-                        p = nextStateId++;
-                        regex2state[deriv] = p;
-                        if (p < StateLimit)
-                            state2regex[p] = deriv;
-                        else
-                            state2regexExtra[p] = deriv;
-                        if (p >= StateLimit)
-                            deltaExtra[p] = new int[K];
+                        StateLimit = builder.statearray.Length;
+                        Array.Resize(ref delta, StateLimit << K);
                     }
                     delta[offset] = p;
-                    regex = deriv;
+                    return p;
                 }
             }
         }
 
         /// <summary>
-        /// Critical region for threadsafe applications for defining a new transition for border anchors
+        /// The frequence is lower in DFA mode because timeout tests are performed much
+        /// less frequently here, once per transition, compared to non-DFA mode.
+        /// So, e.g., 5 here imples checking after every 5 transitions.
         /// </summary>
-        //[MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void CreateNewTransitionForBorderSymbol(int q, BorderSymbol borderSymbol, out int p, out SymbolicRegexNode<S> regex)
+        private const int TimeoutCheckFrequency = 5;
+        private int _timeoutChecksToSkip;
+        /// <summary>
+        /// This code is identical to RegexRunner.DoCheckTimeout()
+        /// </summary>
+        private void DoCheckTimeout()
         {
-            lock (this)
-            {
-                //check if meanwhile the transition has become possibly defined by another thread
-                int borderSymbolId = (int)borderSymbol;
-                int[] targets;
-                if (!deltaForBorderSymbols.TryGetValue(q, out targets))
-                {
-                    // initialize the array of target states for border symbols
-                    targets = new int[(int)BorderSymbol.Count];
-                    deltaForBorderSymbols[q] = targets;
-                }
-                if (targets[borderSymbolId] > 0)
-                {
-                    p = targets[borderSymbolId];
-                    #region find the regex for p
-                    if (p < StateLimit)
-                        regex = state2regex[p];
-                    else
-                        regex = state2regexExtra[p];
-                    #endregion
-                }
-                else
-                {
-                    #region compute the derivative
-                    var q_regex = (q < StateLimit ? state2regex[q] : state2regexExtra[q]);
-                    var deriv = q_regex.MkDerivativeForBorder(borderSymbol);
-                    if (!regex2state.TryGetValue(deriv, out p))
-                    {
-                        p = nextStateId++;
-                        regex2state[deriv] = p;
-                        if (p < StateLimit)
-                            state2regex[p] = deriv;
-                        else
-                            state2regexExtra[p] = deriv;
-                        if (p >= StateLimit)
-                            deltaExtra[p] = new int[K];
-                    }
-                    #endregion
-                    targets[borderSymbolId] = p;
-                    regex = deriv;
-                }
-            }
+            if (--_timeoutChecksToSkip != 0)
+                return;
+
+            _timeoutChecksToSkip = TimeoutCheckFrequency;
+
+            int currentMillis = Environment.TickCount;
+
+            if (currentMillis < _timeoutOccursAt)
+                return;
+
+            if (0 > _timeoutOccursAt && 0 < currentMillis)
+                return;
+
+            //regex pattern is in general not available in srm and
+            //the input is not available here but could be passed as argument to DoCheckTimeout
+            throw new System.Text.RegularExpressions.RegexMatchTimeoutException(string.Empty, string.Empty, _matchTimeout);
         }
 
         /// <summary>
         /// Generate all matches.
+        /// <param name="isMatch">if true return null iff there exists a match</param>
         /// <param name="input">input string</param>
-        /// <param name="limit">upper bound on the number of found matches, nonpositive value (default is 0) means no bound</param>
         /// <param name="startat">the position to start search in the input string</param>
         /// <param name="endat">end position in the input, negative value means unspecified and taken to be input.Length-1</param>
         /// </summary>
-        public List<Match> Matches(string input, int limit = 0, int startat = 0, int endat = -1)
+        public Match FindMatch(bool isMatch, string input, int startat = 0, int endat = -1)
         {
-#if UNSAFE
-            if ((Options & RegexOptions.Vectorize) != RegexOptions.None)
+            if (_checkTimeout)
             {
-                return Matches_(input, limit, startat, endat);
+                // Using Environment.TickCount and not Stopwatch similar to the non-DFA case.
+                int timeout = (int)(_matchTimeout.TotalMilliseconds + 0.5);
+                _timeoutOccursAt = Environment.TickCount + timeout;
             }
-#endif
-            return MatchesSafe(input, limit, startat, endat);
+
+            return FindMatchSafe(isMatch, input, startat, endat);
         }
 
         #region safe version of Matches and IsMatch for string input
 
         /// <summary>
-        /// Generate all matches.
+        /// Find a match.
+        /// <param name="quick">if true return null iff there exists a match</param>
         /// <param name="input">input string</param>
-        /// <param name="limit">upper bound on the number of found matches, nonpositive value (default is 0) means no bound</param>
         /// <param name="startat">the position to start search in the input string</param>
         /// <param name="endat">end position in the input, negative value means unspecified and taken to be input.Length-1</param>
         /// </summary>
-        public List<Match> MatchesSafe(string input, int limit = 0, int startat = 0, int endat = -1)
+        internal Match FindMatchSafe(bool quick, string input, int startat = 0, int endat = -1)
         {
-            if (A.isNullable)
-                throw new AutomataException(AutomataExceptionKind.MustNotAcceptEmptyString);
-            else if (string.IsNullOrEmpty(input) || startat >= input.Length || startat < 0)
-                throw new AutomataException(AutomataExceptionKind.InvalidArgument);
+#if DEBUG
+            if (string.IsNullOrEmpty(input))
+                    throw new ArgumentException($"'{nameof(input)}' must be a nonempty string");
+
+            if (startat >= input.Length || startat < 0)
+                    throw new ArgumentOutOfRangeException(nameof(startat));
+#endif
 
             int k = ((endat < 0 | endat >= input.Length) ? input.Length : endat + 1);
-
-            //stores the accumulated matches
-            List<Match> matches = new List<Match>();
 
             //find the first accepting state
             //initial start position in the input is i = 0
             int i = startat;
 
-            //after a match is found the match_start_boundary becomes 
-            //the first position after the last match
-            int match_start_boundary = i;
+            int i_q0_A1;
+            int watchdog;
+            i = FindFinalStatePosition(input, k, i, out i_q0_A1, out watchdog);
 
-            bool A_has_nonempty_prefix = (!this.A_prefix.Equals(string.Empty));
-
-            bool AisLazy = A_allLoopsAreLazy;
-            bool AisSingleSeq = A.IsSequenceOfSingletons;
-
-            while (true)
+            if (i == k)
             {
-                int i_q0_A1;
-                int watchdog;
-                //optimize for the case when A starts with a fixed prefix
-                i = (A_has_nonempty_prefix ?
-                        FindFinalStatePositionOpt(input, k, i, out i_q0_A1, out watchdog) :
-                        FindFinalStatePosition(input, k, i, out i_q0_A1, out watchdog));
-
-                if (i == k)
-                {
-                    //end of input has been reached without reaching a final state, so no more matches
-                    break;
-                }
+                //end of input has been reached without reaching a final state, so no match exists
+                return Match.NoMatch;
+            }
+            else
+            {
+                if (quick)
+                    return null;
 
                 int i_start;
                 int i_end;
@@ -915,33 +649,12 @@ namespace Microsoft.SRM
                 }
                 else
                 {
-                    //If A is lazy then there is no need to maximize length of end-position
-                    if (AisLazy)
-                    {
-                        if (AisSingleSeq)
-                            i_start = i - A.sequenceOfSingletons_count + 1;
-                        else
-                            i_start = FindStartPosition(input, i, i_q0_A1);
-                        i_end = i;
-                    }
-                    else
-                    {
-                        i_start = FindStartPosition(input, i, i_q0_A1);
-                        i_end = FindEndPosition(input, i_start);
-                    }
+                    i_start = FindStartPosition(input, i, i_q0_A1);
+                    i_end = FindEndPosition(input, k, i_start);
                 }
 
-                var newmatch = new Match(i_start, i_end + 1 - i_start);
-                matches.Add(newmatch);
-                if (limit > 0 && matches.Count == limit)
-                    break;
-
-                //continue matching from the position following last match
-                i = i_end + 1;
-                match_start_boundary = i;
+                return new Match(i_start, i_end + 1 - i_start);
             }
-
-            return matches;
         }
 
         /// <summary>
@@ -949,7 +662,7 @@ namespace Microsoft.SRM
         /// </summary>
         /// <param name="regex"></param>
         /// <returns></returns>
-        int GetWatchdog(SymbolicRegexNode<S> regex)
+        private int GetWatchdog(SymbolicRegexNode<S> regex)
         {
             if (regex.kind == SymbolicRegexKind.WatchDog)
             {
@@ -966,176 +679,46 @@ namespace Microsoft.SRM
         }
 
         /// <summary>
-        /// Returns true iff the input string matches A.
-        /// <param name="input">input string</param>
-        /// <param name="startat">the position to start search in the input string</param>
-        /// <param name="endat">end position in the input, negative value means 
-        /// unspecified and taken to be input.Length-1</param>
-        /// </summary>
-        public bool IsMatch(string input, int startat = 0, int endat = -1)
-        {
-            if (input == null || startat >= input.Length || startat < 0)
-                throw new AutomataException(AutomataExceptionKind.InvalidArgument);
-
-            int k = ((endat < 0 | endat >= input.Length) ? input.Length : endat + 1);
-
-            if (this.A.containsAnchors)
-            {
-                #region original regex contains anchors
-
-                //TBD: prefix optimization
-                //if (A2 == null)
-                //{
-                    //#region initialize A2 to A.RemoveAnchors()
-                    //this.A2 = A.ReplaceAnchors();
-                    //int qA2;
-                    //if (!regex2state.TryGetValue(this.A2, out qA2))
-                    //{
-                    //    //the regex does not yet exist
-                    //    qA2 = this.nextStateId++;
-                    //    this.regex2state[this.A2] = qA2;
-                    //}
-                    //this.q0_A2 = qA2;
-                    //if (qA2 >= this.StateLimit)
-                    //{
-                    //    this.deltaExtra[qA2] = new int[this.K];
-                    //    this.state2regexExtra[qA2] = this.A2;
-                    //}
-                    //else
-                    //{
-                    //    this.state2regex[qA2] = this.A2;
-                    //}
-                    //#endregion
-                //}
-                //int q = this.q0_A2;
-                //SymbolicRegexNode<S> regex = this.A2;
-
-                int q = this.q0_A;
-                SymbolicRegexNode<S> regex = this.A;
-                int i = startat;
-
-                if (i == 0)
-                    q = DeltaBorder(BorderSymbol.Beg, q, out _);
-
-                while (i < k)
-                {
-                    int c = input[i];
-                    int p;
-
-                    if (c == 10)
-                    {
-                        p = DeltaBorder(BorderSymbol.EOL, q, out _);
-                        p = Delta(10, p, out _);
-                        p = DeltaBorder(BorderSymbol.BOL, p, out regex);
-                    }
-                    else
-                        p = Delta(c, q, out regex);
-
-                    if (regex == this.builder.dotStar)
-                    {
-                        //the input is accepted no matter how the input continues
-                        return true;
-                    }
-                    if (regex == this.builder.nothing)
-                    {
-                        //the input is rejected no matter how the input continues
-                        return false;
-                    }
-
-                    //continue from the target state
-                    q = p;
-                    i += 1;
-                }
-
-                q = DeltaBorder(BorderSymbol.End, q, out regex);
-
-                return regex.IsNullable;
-                #endregion
-            }
-            else
-            {
-                #region original regex contains no anchors
-                int i;
-                if (this.A_prefix != string.Empty)
-                    i = FindFinalStatePositionOpt(input, k, startat, out _, out _);
-                else
-                    i = FindFinalStatePosition(input, k, startat, out _, out _);
-                if (i == k)
-                {
-                    //the search for final state exceeded the input, so final state was not found
-                    return false;
-                }
-                else
-                {
-                    //since A has no anchors the pattern is really .*A.*
-                    //thus if input[0...i] is in L(.*A) then input is in L(.*A.*)
-                    return true;
-                }
-                #endregion
-            }
-        }
-
-        /// <summary>
         /// Find match end position using A, end position is known to exist.
         /// </summary>
         /// <param name="input">input array</param>
-        /// <param name="i">start position</param>
+        /// <param name="i">inclusive start position</param>
+        /// <param name="k">exclusive end position</param>
         /// <returns></returns>
-        private int FindEndPosition(string input, int i)
+        private int FindEndPosition(string input, int k, int i)
         {
-            int k = input.Length;
             int i_end = k;
-            int q = q0_A;
-            SymbolicRegexNode<S> regex;
-            if (i == 0)
-                // start of input
-                q = DeltaBorder(BorderSymbol.Beg, q, out _);
-            else if (input[i - 1] == '\n')
-                // start of a line
-                q = DeltaBorder(BorderSymbol.BOL, q, out _);
+            CharKindId prevCharKindId = GetCharKindId(input, i - 1);
+            // pick the correct start state based on previous character kind
+            State<S> q = _Aq0[(int)prevCharKindId];
             while (i < k)
             {
-                int c = input[i];
-                int p;
+                //TBD: prefix optimization for A, i.e., to skip ahead
+                //over the initial prefix once it has been computed
+                q = Delta(input, i, q);
 
-                if (c == 10)
+                if (q.IsNullable(GetCharKind(input, i+1)))
                 {
-                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
-                    if (regex.IsNullable)
-                        //nullable due to $ anchor
-                        //end position is therefore the prior character if it exists
-                        i_end = (i > 0 ? i - 1 : 0);
-                    p = Delta(10, p, out regex);
-                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
-                }
-                else
-                    p = Delta(c, q, out regex);
-
-                if (regex.isNullable)
-                {
+                    // stop here if q is not eager
+                    if (q.Node.info.IsLazy)
+                        return i;
                     //accepting state has been reached
-                    //record the position 
+                    //record the position
                     i_end = i;
                 }
-                else if (regex == builder.nothing)
+                else if (q.Node == builder.nothing)
                 {
                     //nonaccepting sink state (deadend) has been reached in A
                     //so the match ended when the last i_end was updated
                     break;
                 }
-                q = p;
                 i += 1;
             }
-            if (i == k)
-            {
-                DeltaBorder(BorderSymbol.End, q, out regex);
-                if (regex.IsNullable)
-                    //match occurred due to end anchor
-                    //this must be the case here
-                    i_end = k - 1;
-            }
+
+#if DEBUG
             if (i_end == k)
-                throw new AutomataException(AutomataExceptionKind.InternalError);
+                throw new AutomataException(AutomataExceptionKind.InternalError_SymbolicRegex);
+#endif
             return i_end;
         }
 
@@ -1148,847 +731,272 @@ namespace Microsoft.SRM
         /// <returns></returns>
         private int FindStartPosition(string input, int i, int match_start_boundary)
         {
-            int q = q0_Ar;
-            SymbolicRegexNode<S> regex = null;
-            //A_r may have a fixed sequence
-            if (this.Ar_prefix_array.Length > 0)
+            // fetch the correct start state for Ar
+            // this depends on previous character ---
+            // which, because going backwards, is character number i+1
+            CharKindId prevKind = GetCharKindId(input, i + 1);
+            State<S> q = _Arq0[(int)prevKind];
+            //Ar may have a fixed prefix sequence
+            if (Ar_prefix.Length > 0)
             {
-                //skip back the prefix portion of Ar
-                q = this.Ar_skipState;
-                regex = this.Ar_skipStateRegex;
-                i = i - this.Ar_prefix_array.Length;
+                //skip past the prefix portion of Ar
+                q = GetAr_skipState(prevKind);
+                i = i - this.Ar_prefix.Length;
             }
             if (i == -1)
             {
+#if DEBUG
                 //we reached the beginning of the input, thus the state q must be accepting
-                if (!regex.isNullable)
-                    throw new AutomataException(AutomataExceptionKind.InternalError);
+                if (!q.IsNullable(GetCharKind(input, i)))
+                    throw new AutomataException(AutomataExceptionKind.InternalError_SymbolicRegex);
+#endif
                 return 0;
             }
 
             int last_start = -1;
-            if (regex != null && regex.isNullable)
+            if (q.IsNullable(GetCharKind(input, i)))
             {
-                //the whole prefix of Ar was in reverse a prefix of A
+                // the whole prefix of Ar was in reverse a prefix of A
+                // for example when the pattern of A is concrete word such as "abc"
                 last_start = i + 1;
             }
 
             //walk back to the accepting state of Ar
-            int p;
-            int c;
-            if (i == input.Length - 1)
-                // at the end of the input
-                q = DeltaBorder(BorderSymbol.End, q, out _);
-            else if (i > 0 && input[i+1] == '\n')
-                // at the end of a line
-                q = DeltaBorder(BorderSymbol.EOL, q, out _);
-
             while (i >= match_start_boundary)
             {
-                //observe that the input is reversed 
-                //so input[k-1] is the first character 
-                //and input[0] is the last character
-                c = input[i];
+                q = Delta(input, i, q);
 
-                if (c == 10)
-                {
-                    //going backwards, first consume StartLine because reversal keeps the anchors in place
-                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
-                    if (regex.IsNullable)
-                        last_start = i + 1;
-                    p = Delta(10, p, out _);
-                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
-                }
-                else
-                    p = Delta(c, q, out regex);
+                //reached a deadend state,
+                //thus the earliest match start point must have occurred already
+                if (q.IsNothing)
+                    break;
 
-                if (regex.isNullable)
+                if (q.IsNullable(GetCharKind(input, i-1)))
                 {
                     //earliest start point so far
-                    //this must happen at some point 
-                    //or else A1 would not have reached a 
+                    //this must happen at some point
+                    //or else A1 would not have reached a
                     //final state after match_start_boundary
                     last_start = i;
-                    //TBD: under some conditions we can break here
-                    //break;
                 }
-                else if (regex == this.builder.nothing)
-                {
-                    //the previous i_start was in fact the earliest
-                    break;
-                }
-                else if (i == 0)
-                {
-                    //back at the start
-                    //there must be a start anchor blocking nullability
-                    p = DeltaBorder(BorderSymbol.Beg, p, out regex);
-                    if (regex.isNullable)
-                    {
-                        last_start = 0;
-                        break;
-                    }
-                }
-                q = p;
                 i -= 1;
             }
+#if DEBUG
             if (last_start == -1)
-                throw new AutomataException(AutomataExceptionKind.InternalError);
+                throw new AutomataException(AutomataExceptionKind.InternalError_SymbolicRegex);
+#endif
             return last_start;
         }
 
         /// <summary>
-        /// Return the position of the character that leads to a final state in A1
+        /// FindFinalStatePosition is optimized for the case when A starts with a fixed prefix
         /// </summary>
         /// <param name="input">given input string</param>
         /// <param name="i">start position</param>
         /// <param name="i_q0">last position the initial state of A1 was visited</param>
         /// <param name="k">input length or bounded input length</param>
+        /// <param name="watchdog">length of match when positive</param>
         private int FindFinalStatePosition(string input, int k, int i, out int i_q0, out int watchdog)
         {
-            int q = q0_A1;
-            int i_q0_A1 = i;
+            // get the correct start state of A1,
+            // which in general depends on the previous character kind in the input
+            CharKindId prevCharKindId = GetCharKindId(input, i - 1);
+            State<S> q = _A1q0[(int)prevCharKindId];
 
-            SymbolicRegexNode<S> regex = null;
-
-            // start with the start symbol in order to eliminate a pssible start anchor
-            // q will remain the same if there is no start anchor
-            if (i == 0)
-                q = DeltaBorder(BorderSymbol.Beg, q, out regex);
-
-            while (i < k)
+            if (q.IsNothing)
             {
-                if (q == q0_A1)
-                {
-                    i = IndexOfStartset(input, i);
-
-                    if (i == -1)
-                    {
-                        i_q0 = i_q0_A1;
-                        watchdog = -1;
-                        return k;
-                    }
-                    i_q0_A1 = i;
-                }
-
-                int c = input[i];
-                int p;
-
-                if (c == 10)
-                {
-                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
-                    if (regex.isNullable)
-                    {
-                        //match has been found due to endline anchor
-                        //so the match actually ends at the prior character 
-                        //unless the prior character does not exist
-                        i = (i > 0 ? i - 1 : 0);
-                        break;
-                    }
-                    p = Delta(10, p, out regex);
-                    if (regex.isNullable)
-                    {
-                        //match has been found due to newline itself
-                        //this can happen if anchor is not used
-                        //but the newline character is used in the pattern
-                        break;
-                    }
-                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
-                    if (regex.isNullable)
-                    {
-                        //match has been found due to startline anchor
-                        //highly unusual case that should not really happen
-                        //in this case newline is part of the match
-                        break;
-                    }
-                    if (regex == this.builder.nothing)
-                    {
-                        //p is a deadend state so any further search is meaningless
-                        i_q0 = i_q0_A1;
-                        watchdog = -1;
-                        return k;
-                    }
-                }
-                else
-                {
-                    p = Delta(c, q, out regex);
-
-                    if (regex.isNullable)
-                    {
-                        //p is a final state so match has been found
-                        break;
-                    }
-                    else if (regex == this.builder.nothing)
-                    {
-                        //p is a deadend state so any further search is meaningless
-                        i_q0 = i_q0_A1;
-                        watchdog = -1;
-                        return k;
-                    }
-                }
-
-                //continue from the target state
-                q = p;
-                i += 1;
+                //if q is nothing then it is a deadend from the beginning
+                //this happens for example when the original regex started with start anchor and prevCharKindId is not Start
+                i_q0 = i;
+                watchdog = -1;
+                return k;
             }
-            if (i == k)
-            {
-                q = DeltaBorder(BorderSymbol.End, q, out regex);
-                if (regex.IsNullable)
-                    //match occurred due to end anchor
-                    i = i - 1;
-            }
-            i_q0 = i_q0_A1;
-            watchdog = (regex == null ? -1  : this.GetWatchdog(regex));
-            return i;
-        }
 
-        /// <summary>
-        /// FindFinalState optimized for the case when A starts with a fixed prefix
-        /// </summary>
-        /// <param name="input">given input string</param>
-        /// <param name="i">start position</param>
-        /// <param name="i_q0">last position the initial state of A1 was visited</param>
-        /// <param name="k">input length or bounded input length</param>
-        private int FindFinalStatePositionOpt(string input, int k, int i, out int i_q0, out int watchdog)
-        {
-            int q = q0_A1;
             int i_q0_A1 = i;
-            var prefix = this.A_prefix;
-            //it is important to use Ordinal/OrdinalIgnoreCase to avoid culture dependent semantics of IndexOf
+            // use Ordinal/OrdinalIgnoreCase to avoid culture dependent semantics of IndexOf
             StringComparison comparison = (this.A_fixedPrefix_ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-            SymbolicRegexNode<S> regex = null;
             watchdog = -1;
+
+            // search for a match end position within input[i..k-1]
             while (i < k)
             {
-                // ++++ the following prefix optimization can be commented out without affecting correctness ++++
-                // but this optimization has a huge perfomance boost when fixed prefix exists .... in the order of 10x
-                //
-                #region prefix optimization 
-                //stay in the initial state if the prefix does not match
-                //thus advance the current position to the 
-                //first position where the prefix does match
-                if (q == q0_A1)
+                if (q.isInitialState)
                 {
+                    //i_q0_A1 is the most recent position in the input when A1 is in the initial state
                     i_q0_A1 = i;
 
-                    //i = IndexOf(input, prefix, i, this.A_fixedPrefix_ignoreCase);
-                    i = input.IndexOf(prefix, i, comparison);
-
-                    if (i == -1)
+                    if (this.A_prefixBM != null)
                     {
-                        //if a matching position does not exist then IndexOf returns -1
-                        //so set i = k to match the while loop behavior
-                        i = k;
-                        break;
-                    }
-                    else
-                    {
-                        //compute the end state for the A prefix
-                        //skip directly to the resulting state
-                        // --- i.e. does the loop ---
-                        //for (int j = 0; j < prefix.Length; j++)
-                        //    q = Delta(prefix[j], q, out regex);
-                        // ---
-                        q = this.A1_skipState;
-                        regex = this.A1_skipStateRegex;
+                        // ++++ the prefix optimization can be omitted without affecting correctness ++++
+                        // but this optimization has a major perfomance boost when a fixed prefix exists
+                        // .... in some cases in the order of 10x
+                        #region prefix optimization
+                        //stay in the initial state if the prefix does not match
+                        //thus advance the current position to the
+                        //first position where the prefix does match
 
-                        //skip the prefix
-                        i = i + prefix.Length;
-                        if (regex.isNullable)
-                        {
-                            i_q0 = i_q0_A1;
-                            watchdog = GetWatchdog(regex);
-                            //return the last position of the match
-                            return i - 1;
-                        }
-                        if (i == k)
-                        {
-                            i_q0 = i_q0_A1;
-                            watchdog = -1;
-                            //check if there is an End anchor
-                            DeltaBorder(BorderSymbol.End, q, out regex);
-                            if (regex.IsNullable)
-                                return k - 1;
-                            return k;
-                        }
-                    }
-                }
-                #endregion
-
-                //TBD: anchors
-                int c = input[i];
-                int p;
-
-                #region compute one step but extended with line anchors if c = '\n'
-                if (c == 10)
-                {
-                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
-                    if (regex.isNullable)
-                    {
-                        //match has been found due to endline anchor
-                        //so the match actually ends at the prior character 
-                        //unless the prior character does not exist
-                        i = (i > 0 ? i - 1 : 0);
-                        break;
-                    }
-                    p = Delta(10, p, out regex);
-                    if (regex.isNullable)
-                    {
-                        //match has been found due to newline itself
-                        //this can happen if anchor is not used
-                        //but the newline character is used in the pattern
-                        break;
-                    }
-                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
-                    if (regex.isNullable)
-                    {
-                        //match has been found due to startline anchor
-                        //highly unusual case that should not really happen
-                        //in this case newline is part of the match
-                        break;
-                    }
-                    if (regex == this.builder.nothing)
-                    {
-                        //p is a deadend state so any further search is meaningless
-                        i_q0 = i_q0_A1;
-                        return k;
-                    }
-                }
-                else
-                {
-                    p = Delta(c, q, out regex);
-
-                    if (regex.isNullable)
-                    {
-                        //p is a final state so match has been found
-                        break;
-                    }
-                    else if (regex == this.builder.nothing)
-                    {
-                        //p is a deadend state so any further search is meaningless
-                        i_q0 = i_q0_A1;
-                        return k;
-                    }
-                }
-                #endregion
-
-                //continue from the target state
-                q = p;
-                i += 1;
-            }
-            if (i == k)
-            {
-                q = DeltaBorder(BorderSymbol.End, q, out regex);
-                if (regex.IsNullable)
-                    //match occurred due to end anchor
-                    i = i - 1;
-            }
-            i_q0 = i_q0_A1;
-            watchdog = (regex == null ? -1 : this.GetWatchdog(regex));
-            return i;
-        }
-
-        #endregion
-
-#if UNSAFE
-
-        #region unsafe version of Matches for string input
-
-        /// <summary>
-        /// Generate all earliest maximal matches. We know that k is at least 2. Unsafe version of Matches.
-        /// <param name="input">pointer to input string</param>
-        /// <param name="limit">upper bound on the number of found matches, nonpositive value (default is 0) means no bound</param>
-        /// </summary>
-        unsafe public List<Match> Matches_(string input, int limit = 0, int startat = 0, int endat = -1)
-        {
-            int k = ((endat < 0 | endat >= input.Length) ? input.Length : endat + 1);
-            //stores the accumulated matches
-            List<Match> matches = new List<Match>();
-
-            //find the first accepting state
-            //initial start position in the input is i = 0
-            int i = startat;
-
-            //after a match is found the match_start_boundary becomes 
-            //the first postion after the last match
-            //enforced when inlcude_overlaps == false
-            int match_start_boundary = startat;
-
-            //TBD: dont enforce match_start_boundary when match overlaps are allowed
-            bool A_has_nonempty_prefix = (this.A_prefix != string.Empty);
-            fixed (char* inputp = input)
-                if (A_has_nonempty_prefix)
-                {
-                while (true)
-                {
-                    int i_q0_A1;
-                        i = FindFinalStatePositionOpt_(input, i, out i_q0_A1);
-
-                        if (i == k)
-                    {
-                            //end of input has been reached without reaching a final state, so no more matches
-                            break;
-                        }
-
-                        int i_start = FindStartPosition_(inputp, input.Length, i, i_q0_A1);
-
-                        int i_end = FindEndPosition_(inputp, k, i_start);
-
-                        var newmatch = new Match(i_start, i_end + 1 - i_start);
-                        matches.Add(newmatch);
-                        if (limit > 0 && matches.Count == limit)
-                            break;
-
-                        //continue matching from the position following last match
-                        i = i_end + 1;
-                        match_start_boundary = i;
-                    }
-                    }
-                    else
-                    {
-                    while (true)
-                    {
-                        int i_q0_A1;
-                        i = FindFinalStatePosition_(inputp, k, i, out i_q0_A1);
-
-                    if (i == k)
-                    {
-                        //end of input has been reached without reaching a final state, so no more matches
-                        break;
-                    }
-
-                    int i_start = FindStartPosition_(inputp, input.Length, i, i_q0_A1);
-
-                    int i_end = FindEndPosition_(inputp, k, i_start);
-
-                    var newmatch = new Match(i_start, i_end + 1 - i_start);
-                    matches.Add(newmatch);
-                    if (limit > 0 && matches.Count == limit)
-                        break;
-
-                    //continue matching from the position following last match
-                    i = i_end + 1;
-                    match_start_boundary = i;
-                }
-                }
-
-            return matches;
-        }
-
-        /// <summary>
-        /// Return the position of the last character that leads to a final state in A1
-        /// </summary>
-        /// <param name="inputp">given input string</param>
-        /// <param name="k">length of input</param>
-        /// <param name="i">start position</param>
-        /// <param name="i_q0">last position the initial state of A1 was visited</param>
-        /// <returns></returns>
-        unsafe private int FindFinalStatePosition_(char* inputp, int k, int i, out int i_q0)
-        {
-            int q = q0_A1;
-            int i_q0_A1 = i;
-            while (i < k)
-            {
-                if (q == q0_A1)
-                {
-                    if (this.A_StartSet_Vec != null && A_StartSet_Vec.Length == 1)
-                    {
-                        i = VectorizedIndexOf.UnsafeIndexOf1(inputp, k, i, this.A_StartSet_singleton, A_StartSet_Vec[0]);
-                    }
-                    else
-                    {
-                        i = IndexOfStartset_(inputp, k, i);
-                    }
-
-                    if (i == -1)
-                    {
-                        i_q0 = i_q0_A1;
-                        return k;
-                    }
-                    i_q0_A1 = i;
-                }
-
-                //TBD: anchors
-                SymbolicRegexNode<S> regex;
-                int c = inputp[i];
-                int p;
-
-                if (c == 10)
-                {
-                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
-                    if (regex.isNullable)
-                    {
-                        //match has been found due to endline anchor
-                        //so the match actually ends at the prior character 
-                        //unless the prior character does not exist
-                        i = (i > 0 ? i - 1 : 0);
-                        break;
-                    }
-                    p = Delta(10, p, out regex);
-                    if (regex.isNullable)
-                    {
-                        //match has been found due to newline itself
-                        //this can happen if anchor is not used
-                        //but the newline character is used in the pattern
-                        break;
-                    }
-                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
-                    if (regex.isNullable)
-                    {
-                        //match has been found due to startline anchor
-                        //highly unusual case that should not really happen
-                        //in this case newline is part of the match
-                        break;
-                    }
-                    if (regex == this.builder.nothing)
-                    {
-                        //p is a deadend state so any further search is meaningless
-                        i_q0 = i_q0_A1;
-                        return k;
-                    }
-                }
-                else
-                {
-                    p = Delta(c, q, out regex);
-
-                    if (regex.isNullable)
-                    {
-                        //p is a final state so match has been found
-                        break;
-                    }
-                    else if (regex == this.builder.nothing)
-                    {
-                        //p is a deadend state so any further search is meaningless
-                        i_q0 = i_q0_A1;
-                        return k;
-                    }
-                }
-
-                //continue from the target state
-                q = p;
-                i += 1;
-            }
-            i_q0 = i_q0_A1;
-            return i;
-        }
-
-        /// <summary>
-        /// FindFinalState optimized for the case when A starts with a fixed prefix and does not ignore case
-        /// </summary>
-        unsafe private int FindFinalStatePositionOpt_(string input, int i, out int i_q0)
-        {
-            int q = q0_A1;
-            int i_q0_A1 = i;
-            var A_prefix_length = this.A_prefix.Length;
-            //it is important to use Ordinal/OrdinalIgnoreCase to avoid culture dependent semantics of IndexOf
-            StringComparison comparison = (this.A_fixedPrefix_ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-            int k = input.Length;
-            fixed (char* inputp = input)
-                while (i < k)
-                {
-                    SymbolicRegexNode<S> regex = null;
-
-                    #region prefix optimization 
-                    //stay in the initial state if the prefix does not match
-                    //thus advance the current position to the 
-                    //first position where the prefix does match
-                    if (q == q0_A1)
-                    {
-                        i_q0_A1 = i;
-
-                        if (this.A_fixedPrefix_ignoreCase)
-                            i = input.IndexOf(A_prefix, i, comparison);
-                        else
-                            i = VectorizedIndexOf.UnsafeIndexOf(inputp, k, i, A_prefix);
+                        i = A_prefixBM.Scan(input, i, 0, input.Length);
 
                         if (i == -1)
                         {
-                            //if a matching position does not exist then IndexOf returns -1
-                            //so set i = k to match the while loop behavior
-                            i = k;
-                            break;
+                            // when a matching position does not exist then IndexOf returns -1
+                            i_q0 = i_q0_A1;
+                            watchdog = -1;
+                            return k;
                         }
                         else
                         {
                             //compute the end state for the A prefix
                             //skip directly to the resulting state
-                            // --- i.e. does the loop ---
+                            // --- i.e. do the loop ---
                             //for (int j = 0; j < prefix.Length; j++)
                             //    q = Delta(prefix[j], q, out regex);
                             // ---
-                            q = this.A1_skipState;
-                            regex = this.A1_skipStateRegex;
+                            q = GetA1_skipState(q.PrevCharKindId);
 
-                            //skip the prefix
-                            i = i + A_prefix_length;
-                            if (regex.isNullable)
+                            // skip the prefix
+                            i = i + this.A_prefix.Length;
+                            // here i points at the next character (the character immediately following the prefix)
+                            if (q.IsNullable(GetCharKind(input, i)))
                             {
                                 i_q0 = i_q0_A1;
-                                //return the last position of the match
+                                watchdog = GetWatchdog(q.Node);
+                                // return the last position of the match
                                 return i - 1;
                             }
                             if (i == k)
                             {
+                                // no match was found
                                 i_q0 = i_q0_A1;
                                 return k;
                             }
                         }
-                    }
-                    #endregion
-
-                    int c = inputp[i];
-                    int p;
-
-                    if (c == 10)
-                    {
-                        p = DeltaBorder(BorderSymbol.EOL, q, out regex);
-                        if (regex.isNullable)
-                        {
-                            //match has been found due to endline anchor
-                            //so the match actually ends at the prior character 
-                            //unless the prior character does not exist
-                            i = (i > 0 ? i - 1 : 0);
-                            break;
-                        }
-                        p = Delta(10, p, out regex);
-                        if (regex.isNullable)
-                        {
-                            //match has been found due to newline itself
-                            //this can happen if anchor is not used
-                            //but the newline character is used in the pattern
-                            break;
-                        }
-                        p = DeltaBorder(BorderSymbol.BOL, q, out regex);
-                        if (regex.isNullable)
-                        {
-                            //match has been found due to startline anchor
-                            //highly unusual case that should not really happen
-                            //in this case newline is part of the match
-                            break;
-                        }
-                        if (regex == this.builder.nothing)
-                        {
-                            //p is a deadend state so any further search is meaningless
-                            i_q0 = i_q0_A1;
-                            return k;
-                        }
+                        #endregion
                     }
                     else
                     {
-                        p = Delta(c, q, out regex);
+                        // we are still in the initial state, when the prefix is empty
+                        // find the first position i that matches with some character in the start set
+                        i = IndexOfStartset(input, i);
 
-                        if (regex.isNullable)
+                        if (i == -1)
                         {
-                            //p is a final state so match has been found
-                            break;
+                            // no match was found
+                            i_q0 = i_q0_A1;
+                            return k;
                         }
-                        else if (regex == this.builder.nothing)
+
+                        i_q0_A1 = i;
+                        // the start state must be updated
+                        // to reflect the kind of the previous character
+                        // when anchors are not used, q will remain the same state
+                        q = _A1q0[(int)GetCharKindId(input, i - 1)];
+                        if (q.IsNothing)
                         {
-                            //p is a deadend state so any further search is meaningless
                             i_q0 = i_q0_A1;
                             return k;
                         }
                     }
-
-                    //continue from the target state
-                    q = p;
-                    i += 1;
                 }
-            i_q0 = i_q0_A1;
-            return i;
-        }
 
-        /// <summary>
-        /// Walk back in reverse using Ar to find the start position of match, start position is known to exist.
-        /// </summary>
-        /// <param name="input">the input array</param>
-        /// <param name="i">position to start walking back from, i points at the last character of the match</param>
-        /// <param name="match_start_boundary">do not pass this boundary when walking back</param>
-        /// <returns></returns>
-        unsafe private int FindStartPosition_(char* input, int input_length, int i, int match_start_boundary)
-        {
-            int q = q0_Ar;
-            SymbolicRegexNode<S> regex = null;
-            //A_r may have a fixed sequence
-            if (this.Ar_prefix_array.Length > 0)
-            {
-                //skip back the prefix portion of Ar
-                q = this.Ar_skipState;
-                regex = this.Ar_skipStateRegex;
-                i = i - this.Ar_prefix_array.Length;
-            }
-            if (i == -1)
-            {
-                //we reached the beginning of the input, thus the state q must be accepting
-                if (!regex.isNullable)
-                    throw new AutomataException(AutomataExceptionKind.InternalError);
-                return 0;
-            }
+                // make the transition based on input[i]
+                q = Delta(input, i, q);
 
-            int last_start = -1;
-            if (regex != null && regex.isNullable)
-            {
-                //the whole prefix of Ar was in reverse a prefix of A
-                last_start = i + 1;
-            }
-
-            //walk back to the accepting state of Ar
-            int p;
-            int c;
-
-            if (i == input_length - 1)
-                // at the end of the input
-                q = DeltaBorder(BorderSymbol.End, q, out _);
-            else if (i > 0 && input[i + 1] == '\n')
-                // at the end of a line
-                q = DeltaBorder(BorderSymbol.EOL, q, out _);
-
-            while (i >= match_start_boundary)
-            {
-                //observe that the input is reversed 
-                //so input[k-1] is the first character 
-                //and input[0] is the last character
-                //TBD: anchors
-                c = input[i];
-
-                if (c == 10)
+                if (q.IsNullable(GetCharKind(input, i + 1)))
                 {
-                    //going backwards, first consume StartLine because reversal keeps the anchors in place
-                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
-                    if (regex.IsNullable)
-                        last_start = i + 1;
-                    p = Delta(10, p, out _);
-                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
+                    i_q0 = i_q0_A1;
+                    watchdog = GetWatchdog(q.Node);
+                    return i;
                 }
-                else
-                    p = Delta(c, q, out regex);
-
-                if (regex.isNullable)
+                else if (q.IsNothing)
                 {
-                    //earliest start point so far
-                    //this must happen at some point 
-                    //or else A1 would not have reached a 
-                    //final state after match_start_boundary
-                    last_start = i;
-                    //TBD: under some conditions we can break here
-                    //break;
+                    //q is a deadend state so any further search is meaningless
+                    i_q0 = i_q0_A1;
+                    return k;
                 }
-                else if (regex == this.builder.nothing)
-                {
-                    //the previous i_start was in fact the earliest
-                    break;
-                }
-                q = p;
-                i -= 1;
-            }
-            if (last_start == -1)
-                throw new AutomataException(AutomataExceptionKind.InternalError);
-            return last_start;
-        }
-
-        /// <summary>
-        /// Find match end position using A, end position is known to exist.
-        /// </summary>
-        /// <param name="input">input array</param>
-        /// <param name="k">length of input</param>
-        /// <param name="i">start position</param>
-        /// <returns></returns>
-        unsafe private int FindEndPosition_(char* input, int k, int i)
-        {
-            int i_end = k;
-            int q = q0_A;
-            SymbolicRegexNode<S> regex;
-            if (i == 0)
-                // start of input
-                q = DeltaBorder(BorderSymbol.Beg, q, out _);
-            else if (input[i - 1] == '\n')
-                // start of a line
-                q = DeltaBorder(BorderSymbol.BOL, q, out _);
-
-            while (i < k)
-            {
-                int c = input[i];
-                int p;
-
-                if (c == 10)
-                {
-                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
-                    if (regex.IsNullable)
-                        //nullable due to $ anchor
-                        //end position is therefore the prior character if it exists
-                        i_end = (i > 0 ? i - 1 : 0);
-                    p = Delta(10, p, out regex);
-                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
-                }
-                else
-                    p = Delta(c, q, out regex);
-
-
-                if (regex.isNullable)
-                {
-                    //accepting state has been reached
-                    //record the position 
-                    i_end = i;
-                }
-                else if (regex == builder.nothing)
-                {
-                    //nonaccepting sink state (deadend) has been reached in A
-                    //so the match ended when the last i_end was updated
-                    break;
-                }
-                q = p;
+                // continue from the next character
                 i += 1;
+
+                if (_checkTimeout)
+                    DoCheckTimeout();
             }
-            if (i == k)
+
+            i_q0 = i_q0_A1;
+            return k;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private uint GetCharKind(string input, int i) => CharKind.From(GetCharKindId(input, i));
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private CharKindId GetCharKindId(string input, int i)
+        {
+            if (A.info.ContainsSomeAnchor)
             {
-                DeltaBorder(BorderSymbol.End, q, out regex);
-                if (regex.IsNullable)
-                    //match occurred due to end anchor
-                    //this must be the case here
-                    i_end = k - 1;
+                if (i == -1)
+                    return CharKindId.Start;
+
+                if (i == input.Length)
+                    return CharKindId.End;
+
+                char nextChar = input[i];
+                if (nextChar == '\n')
+                {
+                    if (builder.newLinePredicate.Equals(builder.solver.False))
+                        return 0;
+                    else
+                    {
+                        if (i == input.Length - 1)
+                            return CharKindId.NewLineZ;
+                        else
+                            return CharKindId.Newline;
+                    }
+                }
+
+                if (nextChar < 128)
+                    return _asciiCharKindId[nextChar];
+                else
+                    return builder.solver.MkAnd(GetAtom(nextChar), builder.wordLetterPredicate).Equals(builder.solver.False) ? CharKindId.None : CharKindId.WordLetter;
             }
-            if (i_end == k)
-                throw new AutomataException(AutomataExceptionKind.InternalError);
-            return i_end;
+            else
+            {
+                // the previous character kind is irrelevant when anchors are not used
+                return CharKindId.None;
+            }
         }
 
         #endregion
 
-#endif
-
         #region Specialized IndexOf
         /// <summary>
         ///  Find first occurrence of startset element in input starting from index i.
+        ///  Startset here is assumed to consist of a few characters
         /// </summary>
         /// <param name="input">input string to search in</param>
         /// <param name="i">the start index in input to search from</param>
         /// <returns></returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        int IndexOfStartset(string input, int i)
+        private int IndexOfStartset(string input, int i)
         {
-            int k = input.Length;
-            while (i < k)
-            {
-                var input_i = input[i];
-                if (input_i < A_StartSet.precomputed.Length ? A_StartSet.precomputed[input_i] : A_StartSet.bst.Find(input_i) == 1)
-                    break;
-                else
-                    i += 1;
-            }
-            if (i == k)
-                return -1;
+            if (A_StartSet_Size <= s_A_startset_array_max_size)
+                return input.IndexOfAny(A_startset_array, i);
             else
-                return i;
+            {
+                for (int j = i; j < input.Length; j++)
+                {
+                    char c = input[j];
+                    if (A_StartSet.Contains(c))
+                        return j;
+                }
+            }
+            return -1;
         }
 
         /// <summary>
         ///  Find first occurrence of startset element in input starting from index i.
         /// </summary>
-        /// <param name="input">input string to search in</param>
-        /// <param name="i">the start index in input to search from</param>
-        /// <returns></returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        int IndexOfStartsetUTF8(byte[] input, int i, ref int surrogate_codepoint)
+        private int IndexOfStartsetUTF8(byte[] input, int i, ref int surrogate_codepoint)
         {
             int k = input.Length;
             int step = 1;
@@ -2009,7 +1017,7 @@ namespace Microsoft.SRM
                     }
                 }
 
-                if (c < A_StartSet.precomputed.Length ? A_StartSet.precomputed[c] : A_StartSet.bst.Find(c) == 1)
+                if (A_StartSet.Contains((ushort)c))
                     break;
                 else
                 {
@@ -2030,7 +1038,7 @@ namespace Microsoft.SRM
         /// <param name="i">the search start index in input</param>
         /// <returns></returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        int IndexOf(byte[] input, byte[] value, int i)
+        private int IndexOf(byte[] input, byte[] value, int i)
         {
             int n = value.Length;
             int k = (input.Length - n) + 1;
@@ -2057,7 +1065,7 @@ namespace Microsoft.SRM
         /// <param name="i">the search start index in input</param>
         /// <returns></returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        int IndexOf(byte[] input, bool[] pred, int i)
+        private int IndexOf(byte[] input, bool[] pred, int i)
         {
             int k = input.Length;
             while (i < k && !pred[input[i]])
@@ -2065,519 +1073,13 @@ namespace Microsoft.SRM
             return (i == k ? -1 : i);
         }
 
-#if UNSAFE
-        /// <summary>
-        ///  Find first occurrence of startset element in input starting from index i.
-        /// </summary>
-        /// <param name="input">input string to search in</param>
-        /// <param name="k">length of the input</param>
-        /// <param name="i">the start index in input to search from</param>
-        /// <returns></returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        unsafe int IndexOfStartset_(char* input, int k, int i)
+        public void SaveDGML(TextWriter writer, int bound = 0, bool hideStateInfo = false, bool addDotStar = false, bool inReverse = false, bool onlyDFAinfo = false, int maxLabelLength = 500)
         {
-            while (i < k)
-            {
-                var input_i = input[i];
-                if (input_i < A_StartSet.precomputed.Length ? A_StartSet.precomputed[input_i] : A_StartSet.bst.Find(input_i) == 1)
-                    break;
-                else
-                    i += 1;
-            }
-            if (i == k)
-                return -1;
-            else
-                return i;
+            var graph = new DGML.RegexDFA<S>(this, bound, addDotStar, inReverse);
+            var dgml = new DGML.DgmlWriter(writer, hideStateInfo, maxLabelLength, onlyDFAinfo);
+            dgml.Write<S>(graph);
         }
 
-        /// <summary>
-        ///  Find first occurrence of s in input starting from index i.
-        ///  This method is called when A has nonemmpty prefix and ingorecase is false
-        /// </summary>
-        /// <param name="input">input string to search in</param>
-        /// <param name="k">length of input string</param>
-        /// <param name="i">the start index in input</param>
-        /// <returns></returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        unsafe int IndexOfStartPrefix_(char* input, int k, int i)
-        {
-            int l = this.A_prefix.Length;
-            int k1 = k - l + 1;
-            var vec = A_StartSet_Vec[0];
-            fixed (char* p = this.A_prefix)
-            {
-                while (i < k1)
-                {
-                    i = VectorizedIndexOf.UnsafeIndexOf1(input, k, i, p[0], vec);
-
-                    if (i == -1)
-                        return -1;
-                    int j = 1;
-                    while (j < l && input[i + j] == p[j])
-                        j += 1;
-                    if (j == l)
-                        return i;
-
-                    i += 1;
-                }
-            }
-            return -1;
-        }
-#endif
-
-        #endregion
-
-        #region Matches that uses UTF-8 encoded byte array as input
-
-        /// <summary>
-        /// Generate all earliest maximal matches.
-        /// <paramref name="input">pointer to input string</paramref>
-        /// </summary>
-        internal List<Match> MatchesUTF8(byte[] input)
-        {
-            int k = input.Length;
-
-            //stores the accumulated matches
-            List<Match> matches = new List<Match>();
-
-            //find the first accepting state
-            //initial start position in the input is i = 0
-            int i = 0;
-
-            //after a match is found the match_start_boundary becomes 
-            //the first postion after the last match
-            //enforced when inlcude_overlaps == false
-            int match_start_boundary = 0;
-
-            int surrogate_codepoint = 0;
-
-            //TBD: dont enforce match_start_boundary when match overlaps are allowed
-            bool A_has_nonempty_prefix = (this.A_prefix != string.Empty);
-            while (true)
-            {
-                int i_q0_A1;
-                //TBD: optimize for the case when A starts with a fixed prefix
-                i = FindFinalStatePositionUTF8(input, i, ref surrogate_codepoint, out i_q0_A1);
-
-                if (i == k)
-                {
-                    //end of input has been reached without reaching a final state, so no more matches
-                    break;
-                }
-
-                int i_start = FindStartPositionUTF8(input, i, ref surrogate_codepoint, i_q0_A1);
-
-                int i_end = FindEndPositionUTF8(input, i_start, ref surrogate_codepoint);
-
-                var newmatch = new Match(i_start, i_end + 1 - i_start);
-                matches.Add(newmatch);
-
-                //continue matching from the position following last match
-                i = i_end + 1;
-                match_start_boundary = i;
-            }
-
-            return matches;
-        }
-
-        /// <summary>
-        /// Find match end position using A, end position is known to exist.
-        /// </summary>
-        /// <param name="input">input array</param>
-        /// <param name="i">start position</param>
-        /// <param name="surrogate_codepoint">surrogate codepoint</param>
-        /// <returns></returns>
-        private int FindEndPositionUTF8(byte[] input, int i, ref int surrogate_codepoint)
-        {
-            int k = input.Length;
-            int i_end = k;
-            int q = q0_A;
-            int step = 0;
-            int codepoint = 0;
-            SymbolicRegexNode<S> regex;
-            if (i == 0)
-                // start of input
-                q = DeltaBorder(BorderSymbol.Beg, q, out _);
-            else if (input[i - 1] == '\n')
-                // start of a line
-                q = DeltaBorder(BorderSymbol.BOL, q, out _);
-
-            while (i < k)
-            {
-                ushort c;
-                #region c = current UTF16 character
-                if (surrogate_codepoint == 0)
-                {
-                    c = input[i];
-                    if (c > 0x7F)
-                    {
-                        int x;
-                        UTF8Encoding.DecodeNextNonASCII(input, i, out x, out codepoint);
-                        if (codepoint > 0xFFFF)
-                        {
-                            surrogate_codepoint = codepoint;
-                            c = UTF8Encoding.HighSurrogate(codepoint);
-                            //do not increment i yet because L is pending
-                            step = 0;
-                        }
-                        else
-                        {
-                            c = (ushort)codepoint;
-                            //step is either 2 or 3, i.e. either 2 or 3 UTF-8-byte encoding
-                            step = x;
-                        }
-                    }
-                }
-                else
-                {
-                    c = UTF8Encoding.LowSurrogate(surrogate_codepoint);
-                    //reset the surrogate_codepoint
-                    surrogate_codepoint = 0;
-                    //increment i by 4 since low surrogate has now been read
-                    step = 4;
-                }
-                #endregion
-
-                int p;
-
-
-                if (c == 10)
-                {
-                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
-                    if (regex.IsNullable)
-                        //nullable due to $ anchor
-                        //end position is therefore the prior character if it exists
-                        i_end = (i > 0 ? i - 1 : 0);
-                    p = Delta(10, p, out _);
-                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
-                }
-                else
-                    p = Delta(c, q, out regex);
-
-                if (regex.isNullable)
-                {
-                    //accepting state has been reached
-                    //record the position 
-                    i_end = i;
-                }
-                else if (regex == builder.nothing)
-                {
-                    //nonaccepting sink state (deadend) has been reached in A
-                    //so the match ended when the last i_end was updated
-                    break;
-                }
-                q = p;
-                if (c > 0x7F)
-                    i += step;
-                else
-                    i += 1;
-            }
-            if (i == k)
-            {
-                DeltaBorder(BorderSymbol.End, q, out regex);
-                if (regex.IsNullable)
-                    //match occurred due to end anchor
-                    //this must be the case here
-                    //TBD: adjust offset according to uft8 if nonascii
-                    i_end = k - 1;
-            }
-            if (i_end == k)
-                throw new AutomataException(AutomataExceptionKind.InternalError);
-            return i_end;
-        }
-
-        /// <summary>
-        /// Walk back in reverse using Ar to find the start position of match, start position is known to exist.
-        /// </summary>
-        /// <param name="input">the input array</param>
-        /// <param name="i">position to start walking back from, i points at the last character of the match</param>
-        /// <param name="match_start_boundary">do not pass this boundary when walking back</param>
-        /// <param name="surrogate_codepoint">surrogate codepoint</param>
-        /// <returns></returns>
-        private int FindStartPositionUTF8(byte[] input, int i, ref int surrogate_codepoint, int match_start_boundary)
-        {
-            int q = q0_Ar;
-            SymbolicRegexNode<S> regex = null;
-            //A_r may have a fixed sequence
-            if (this.Ar_prefix_array.Length > 0)
-            {
-                //skip back the prefix portion of Ar
-                q = this.Ar_skipState;
-                regex = this.Ar_skipStateRegex;
-                i = i - this.Ar_prefix_array.Length;
-            }
-            if (i == -1)
-            {
-                //we reached the beginning of the input, thus the state q must be accepting
-                if (!regex.isNullable)
-                    throw new AutomataException(AutomataExceptionKind.InternalError);
-                return 0;
-            }
-
-            int last_start = -1;
-            if (regex != null && regex.isNullable)
-            {
-                //the whole prefix of Ar was in reverse a prefix of A
-                last_start = i + 1;
-            }
-
-            //walk back to the accepting state of Ar
-            int p;
-            ushort c;
-            int codepoint;
-
-            // TBD: calculation of next character for nonascii is not 1 but 2 or 3 bytes off
-            if (i == input.Length - 1)
-                // at the end of the input
-                q = DeltaBorder(BorderSymbol.End, q, out _);
-            else if (i > 0 && input[i + 1] == '\n')
-                // at the end of a line
-                q = DeltaBorder(BorderSymbol.EOL, q, out _);
-
-            while (i >= match_start_boundary)
-            {
-                //observe that the input is reversed 
-                //so input[k-1] is the first character 
-                //and input[0] is the last character
-                //but encoding is not reversed
-                //TBD: anchors
-
-                #region c = current UTF16 character
-                if (surrogate_codepoint == 0)
-                {
-                    //not in the middel of surrogate codepoint 
-                    c = input[i];
-                    if (c > 0x7F)
-                    {
-                        int _;
-                        UTF8Encoding.DecodeNextNonASCII(input, i, out _, out codepoint);
-                        if (codepoint > 0xFFFF)
-                        {
-                            //given codepoint = ((H - 0xD800) * 0x400) + (L - 0xDC00) + 0x10000
-                            surrogate_codepoint = codepoint;
-                            //compute c = L (going backwards) 
-                            c = (ushort)(((surrogate_codepoint - 0x10000) & 0x3FF) | 0xDC00);
-                        }
-                        else
-                        {
-                            c = (ushort)codepoint;
-                        }
-                    }
-                }
-                else
-                {
-                    //given surrogate_codepoint = ((H - 0xD800) * 0x400) + (L - 0xDC00) + 0x10000
-                    //compute c = H (going backwards)
-                    c = (ushort)(((surrogate_codepoint - 0x10000) >> 10) | 0xD800);
-                    //reset the surrogate codepoint 
-                    surrogate_codepoint = 0;
-                }
-                #endregion
-
-                if (c == 10)
-                {
-                    //going backwards, first consume StartLine because reversal keeps the anchors in place
-                    p = DeltaBorder(BorderSymbol.BOL, q, out regex);
-                    if (regex.IsNullable)
-                        last_start = i + 1;
-                    p = Delta(10, p, out _);
-                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
-                }
-                else
-                    p = Delta(c, q, out regex);
-
-                if (regex.isNullable)
-                {
-                    //earliest start point so far
-                    //this must happen at some point 
-                    //or else A1 would not have reached a 
-                    //final state after match_start_boundary
-                    last_start = i;
-                    //TBD: under some conditions we can break here
-                    //break;
-                }
-                else if (regex == this.builder.nothing)
-                {
-                    //the previous i_start was in fact the earliest
-                    surrogate_codepoint = 0;
-                    break;
-                }
-                if (surrogate_codepoint == 0)
-                {
-                    i = i - 1;
-                    //step back to the previous input, /while input[i] is not a start-byte take a step back
-                    //check (0x7F < b && b < 0xC0) imples that 0111.1111 < b < 1100.0000
-                    //so b cannot be ascii 0xxx.xxxx or startbyte 110x.xxxx or 1110.xxxx or 1111.0xxx
-                    while ((i >= match_start_boundary) && (0x7F < input[i] && input[i] < 0xC0))
-                        i = i - 1;
-                }
-                q = p;
-            }
-            if (last_start == -1)
-                throw new AutomataException(AutomataExceptionKind.InternalError);
-            return last_start;
-        }
-
-        /// <summary>
-        /// Return the position of the last character that leads to a final state in A1
-        /// </summary>
-        /// <param name="input">given input array</param>
-        /// <param name="i">start position</param>
-        /// <param name="i_q0">last position the initial state of A1 was visited</param>
-        /// <param name="surrogate_codepoint">surrogate codepoint</param>
-        /// <returns></returns>
-        private int FindFinalStatePositionUTF8(byte[] input, int i, ref int surrogate_codepoint, out int i_q0)
-        {
-            int k = input.Length;
-            int q = q0_A1;
-            int i_q0_A1 = i;
-            int step = 0;
-            int codepoint;
-            SymbolicRegexNode<S> regex;
-            bool prefix_optimize = (!this.A_fixedPrefix_ignoreCase) && this.A_prefixUTF8.Length > 1;
-            while (i < k)
-            {
-                if (q == q0_A1)
-                {
-                    if (prefix_optimize)
-                    {
-                        #region prefix optimization when A has a fixed prefix and is case-sensitive
-                        //stay in the initial state if the prefix does not match
-                        //thus advance the current position to the 
-                        //first position where the prefix does match
-                        i_q0_A1 = i;
-
-                        i = VectorizedIndexOf.IndexOfByteSeq(input, i, this.A_prefixUTF8, this.A_prefixUTF8_first_byte);
-
-                        if (i == -1)
-                        {
-                            //if a matching position does not exist then IndexOf returns -1
-                            //so set i = k to match the while loop behavior
-                            i = k;
-                            break;
-                        }
-                        else
-                        {
-                            //compute the end state for the A prefix
-                            //skip directly to the resulting state
-                            // --- i.e. do the loop ---
-                            //for (int j = 0; j < prefix.Length; j++)
-                            //    q = Delta(prefix[j], q, out regex);
-                            // ---
-                            q = this.A1_skipState;
-                            regex = this.A1_skipStateRegex;
-
-                            //skip the prefix
-                            i = i + this.A_prefixUTF8.Length;
-                            if (regex.isNullable)
-                            {
-                                i_q0 = i_q0_A1;
-                                //return the last position of the match
-                                //make sure to step back to the start byte
-                                i = i - 1;
-                                //while input[i] is not a start-byte take a step back
-                                while (0x7F < input[i] && input[i] < 0xC0)
-                                    i = i - 1;
-                            }
-                            if (i == k)
-                            {
-                                i_q0 = i_q0_A1;
-                                return k;
-                            }
-                        }
-                        #endregion
-                    }
-                    else
-                    {
-                        i = (this.A_prefixUTF8.Length == 0 ?
-                            IndexOfStartsetUTF8(input, i, ref surrogate_codepoint) :
-                            VectorizedIndexOf.IndexOfByte(input, i, this.A_prefixUTF8[0], this.A_prefixUTF8_first_byte));
-
-                        if (i == -1)
-                        {
-                            i_q0 = i_q0_A1;
-                            return k;
-                        }
-                        i_q0_A1 = i;
-                    }
-                }
-
-                ushort c;
-
-                #region c = current UTF16 character
-                if (surrogate_codepoint == 0)
-                {
-                    c = input[i];
-                    if (c > 0x7F)
-                    {
-                        int x;
-                        UTF8Encoding.DecodeNextNonASCII(input, i, out x, out codepoint);
-                        if (codepoint > 0xFFFF)
-                        {
-                            //given codepoint = ((H - 0xD800) * 0x400) + (L - 0xDC00) + 0x10000
-                            surrogate_codepoint = codepoint;
-                            //compute c = H 
-                            c = (ushort)(((codepoint - 0x10000) >> 10) | 0xD800);
-                            //do not increment i yet because L is pending
-                            step = 0;
-                        }
-                        else
-                        {
-                            c = (ushort)codepoint;
-                            //step is either 2 or 3, i.e. either 2 or 3 UTF-8-byte encoding
-                            step = x;
-                        }
-                    }
-                }
-                else
-                {
-                    //given surrogate_codepoint = ((H - 0xD800) * 0x400) + (L - 0xDC00) + 0x10000
-                    //compute c = L 
-                    c = (ushort)(((surrogate_codepoint - 0x10000) & 0x3FF) | 0xDC00);
-                    //reset the surrogate_codepoint
-                    surrogate_codepoint = 0;
-                    //increment i by 4 since low surrogate has now been read
-                    step = 4;
-                }
-                #endregion
-
-
-                int p;
-
-
-                if (c == 10)
-                {
-                    p = DeltaBorder(BorderSymbol.EOL, q, out regex);
-                    if (regex.IsNullable)
-                        break;
-                    p = Delta(10, p, out regex);
-                    p = DeltaBorder(BorderSymbol.BOL, p, out regex);
-                }
-                else
-                    p = Delta(c, q, out regex);
-
-                if (regex.isNullable)
-                {
-                    //p is a final state so match has been found
-                    break;
-                }
-                else if (regex == this.builder.nothing)
-                {
-                    //p is a deadend state so any further search is meaningless
-                    i_q0 = i_q0_A1;
-                    return k;
-                }
-
-                //continue from the target state
-                q = p;
-                if (c > 0x7F)
-                    i += step;
-                else
-                    i += 1;
-            }
-            i_q0 = i_q0_A1;
-            return i;
-        }
         #endregion
     }
 }

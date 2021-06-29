@@ -1,20 +1,23 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Collections.Generic;
 
 namespace Microsoft.SRM
 {
     internal class RangeConverter
     {
-        Dictionary<BDD, Tuple<uint, uint>[]> rangeCache = new Dictionary<BDD, Tuple<uint, uint>[]>();
+        private Dictionary<BDD, Tuple<uint, uint>[]> rangeCache = new Dictionary<BDD, Tuple<uint, uint>[]>();
 
         internal RangeConverter()
         {
         }
 
         //e.g. if b = 6 and p = 2 and ranges = (in binary form) {[0000 1010, 0000 1110]} i.e. [x0A,x0E]
-        //then res = {[0000 1010, 0000 1110], [0001 1010, 0001 1110], 
-        //            [0010 1010, 0010 1110], [0011 1010, 0011 1110]}, 
-        Tuple<uint, uint>[] LiftRanges(int b, int p, Tuple<uint, uint>[] ranges)
+        //then res = {[0000 1010, 0000 1110], [0001 1010, 0001 1110],
+        //            [0010 1010, 0010 1110], [0011 1010, 0011 1110]},
+        private Tuple<uint, uint>[] LiftRanges(int b, int p, Tuple<uint, uint>[] ranges)
         {
             if (p == 0)
                 return ranges;
@@ -57,7 +60,7 @@ namespace Microsoft.SRM
             return res;
         }
 
-        Tuple<uint, uint>[] ToRanges1(BDD set)
+        private Tuple<uint, uint>[] ToRanges1(BDD set)
         {
             Tuple<uint, uint>[] ranges;
             if (!rangeCache.TryGetValue(set, out ranges))
@@ -178,13 +181,13 @@ namespace Microsoft.SRM
         }
 
         /// <summary>
-        /// Convert the set into an equivalent array of ranges. 
-        /// The ranges are nonoverlapping and ordered. 
+        /// Convert the set into an equivalent array of ranges.
+        /// The ranges are nonoverlapping and ordered.
         /// </summary>
         public Tuple<uint, uint>[] ToRanges(BDD set, int maxBit)
         {
             if (set.IsEmpty)
-                return new Tuple<uint, uint>[] { };
+                return Array.Empty<Tuple<uint, uint>>();
             else if (set.IsFull)
                 return new Tuple<uint, uint>[] { new Tuple<uint, uint>(0, ((((uint)1 << maxBit) << 1) - 1)) }; //note: maxBit could be 31
             else
