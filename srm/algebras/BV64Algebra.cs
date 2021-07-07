@@ -183,7 +183,7 @@ namespace Microsoft.SRM
         public string PrettyPrint(ulong bv)
         {
             //accesses the shared BDD solver
-            var bddalgebra = Microsoft.SRM.Regex.s_unicode.solver;
+            var bddalgebra = Regex.s_unicode.solver;
 
             if (_partition == null || bddalgebra == null)
                 return "[" + SerializePredicate(bv) + "]";

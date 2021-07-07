@@ -32,20 +32,6 @@ namespace Microsoft.SRM
         /// </summary>
         private Classifier dt;
 
-#if UNSAFE
-        /// <summary>
-        /// If not null then contains all relevant start characters as vectors
-        /// </summary>
-        [NonSerialized]
-        Vector<ushort>[] A_StartSet_Vec = null;
-
-        /// <summary>
-        /// If A_StartSet_Vec is length 1 then contains the corresponding character
-        /// </summary>
-        [NonSerialized]
-        ushort A_StartSet_singleton;
-#endif
-
         /// <summary>
         /// Original regex.
         /// </summary>
@@ -102,16 +88,6 @@ namespace Microsoft.SRM
         /// </summary>
         private System.Text.RegularExpressions.RegexBoyerMoore A_prefixBM;
 
-        ///// <summary>
-        ///// if nonempty then A has that fixed prefix
-        ///// </summary>>
-        //private byte[] A_prefixUTF8;
-
-        ///// <summary>
-        ///// predicate array corresponding to fixed prefix of A
-        ///// </summary>
-        //private S[] A_prefix_array;
-
         /// <summary>
         /// if true then the fixed prefix of A is idependent of case
         /// </summary>
@@ -120,21 +96,20 @@ namespace Microsoft.SRM
         /// <summary>
         /// Cached skip states from the initial state of A1 for the 6 possible previous character kinds.
         /// </summary>
-        private State<S>[] _A1_skipState = new State<S>[6];
+        private State<S>[] _A1_skipState = new State<S>[5];
 
-        private State<S> GetA1_skipState(CharKindId prevCharKindId)
+        private State<S> GetA1_skipState(uint prevCharKind)
         {
-            int id = (int)prevCharKindId;
-            if (_A1_skipState[id] == null)
+            if (_A1_skipState[prevCharKind] == null)
             {
-                var state = DeltaPlus(A_prefix, _A1q0[id]);
+                var state = DeltaPlus(A_prefix, _A1q0[prevCharKind]);
                 lock (this)
                 {
-                    if (_A1_skipState[id] == null)
-                        _A1_skipState[id] = state;
+                    if (_A1_skipState[prevCharKind] == null)
+                        _A1_skipState[prevCharKind] = state;
                 }
             }
-            return _A1_skipState[id];
+            return _A1_skipState[prevCharKind];
         }
 
         /// <summary>
@@ -154,19 +129,18 @@ namespace Microsoft.SRM
         /// </summary>
         private State<S>[] _Ar_skipState = new State<S>[6];
 
-        private State<S> GetAr_skipState(CharKindId prevCharKindId)
+        private State<S> GetAr_skipState(uint prevCharKind)
         {
-            int id = (int)prevCharKindId;
-            if (_Ar_skipState[id] == null)
+            if (_Ar_skipState[prevCharKind] == null)
             {
-                var state = DeltaPlus(Ar_prefix, _Arq0[id]);
+                var state = DeltaPlus(Ar_prefix, _Arq0[prevCharKind]);
                 lock (this)
                 {
-                    if (_Ar_skipState[id] == null)
-                        _Ar_skipState[id] = state;
+                    if (_Ar_skipState[prevCharKind] == null)
+                        _Ar_skipState[prevCharKind] = state;
                 }
             }
-            return _Ar_skipState[id];
+            return _Ar_skipState[prevCharKind];
         }
 
         /// <summary>
@@ -174,13 +148,13 @@ namespace Microsoft.SRM
         /// </summary>
         internal SymbolicRegexNode<S> A1;
 
-        private State<S>[] _Aq0 = new State<S>[6];
+        private State<S>[] _Aq0 = new State<S>[5];
 
-        private State<S>[] _A1q0 = new State<S>[6];
+        private State<S>[] _A1q0 = new State<S>[5];
 
-        private State<S>[] _Arq0 = new State<S>[6];
+        private State<S>[] _Arq0 = new State<S>[5];
 
-        private CharKindId[] _asciiCharKindId = new CharKindId[128];
+        private uint[] _asciiCharKind = new uint[128];
 
         /// <summary>
         /// Initialized to the next power of 2 that is at least the number of atoms
@@ -315,17 +289,17 @@ namespace Microsoft.SRM
             {
                 //line anchors are being used when builder.newLinePredicate is different from False
                 if (!builder.newLinePredicate.Equals(builder.solver.False))
-                    _asciiCharKindId[10] = CharKindId.Newline;
+                    _asciiCharKind[10] = CharKind.Newline;
                 //word boundary is being used when builder.wordLetterPredicate is different from False
                 if (!builder.wordLetterPredicate.Equals(builder.solver.False))
                 {
-                    _asciiCharKindId['_'] = CharKindId.WordLetter;
+                    _asciiCharKind['_'] = CharKind.WordLetter;
                     for (char i = '0'; i <= '9'; i++)
-                        _asciiCharKindId[i] = CharKindId.WordLetter;
+                        _asciiCharKind[i] = CharKind.WordLetter;
                     for (char i = 'A'; i <= 'Z'; i++)
-                        _asciiCharKindId[i] = CharKindId.WordLetter;
+                        _asciiCharKind[i] = CharKind.WordLetter;
                     for (char i = 'a'; i <= 'z'; i++)
-                        _asciiCharKindId[i] = CharKindId.WordLetter;
+                        _asciiCharKind[i] = CharKind.WordLetter;
                 }
             }
             InitializeRegexes();
@@ -341,9 +315,6 @@ namespace Microsoft.SRM
         internal SymbolicRegexMatcher(SymbolicRegexNode<S> sr, CharSetSolver css, BDD[] minterms, RegexOptions options, TimeSpan matchTimeout, CultureInfo culture)
         {
             _culture = culture;
-            if (sr.IsNullable)
-                throw new NotSupportedException(SRM.Regex._DFA_incompatible_with + "nullable regex (accepting the empty string)");
-
             _matchTimeout = matchTimeout;
             _checkTimeout = (System.Text.RegularExpressions.Regex.InfiniteMatchTimeout != _matchTimeout);
             _timeout = (int)(matchTimeout.TotalMilliseconds + 0.5); // Round up, so it will at least 1ms;
@@ -379,13 +350,13 @@ namespace Microsoft.SRM
             InitializeRegexes();
 
             A_startset = A.GetStartSet();
+            if (!builder.solver.IsSatisfiable(A_startset))
+                //if the startset is empty make it full instead by including all characters
+                //this is to ensure that startset is nonempty -- as an invariant assumed by operations using it
+                A_startset = builder.solver.True;
+
             this.A_StartSet_Size = (int)builder.solver.ComputeDomainSize(A_startset);
 
-
-#if DEBUG
-            if (this.A_StartSet_Size == 0)
-                throw new NotSupportedException(SRM.Regex._DFA_incompatible_with + "characterless regex");
-#endif
             var startbdd = builder.solver.ConvertToCharSet(css, A_startset);
             this.A_StartSet = BooleanClassifier.Create(css, startbdd);
             //store the start characters in the A_startset_array if there are not too many characters
@@ -394,16 +365,16 @@ namespace Microsoft.SRM
             else
                 this.A_startset_array = Array.Empty<char>();
 
-            this.A_prefix = A.GetFixedPrefix(css, out this.A_fixedPrefix_ignoreCase);
-            this.Ar_prefix = Ar.GetFixedPrefix(css, out _);
+            this.A_prefix = A.GetFixedPrefix(css, culture.Name, out this.A_fixedPrefix_ignoreCase);
+            this.Ar_prefix = Ar.GetFixedPrefix(css, culture.Name, out _);
 
             InitializePrefixBoyerMoore();
 
             if (A.info.ContainsSomeAnchor)
                 for (int i = 0; i < 128; i++)
-                    _asciiCharKindId[i] =
-                        i == 10 ? (builder.solver.MkAnd(GetAtom(i), builder.newLinePredicate).Equals(builder.solver.False) ? CharKindId.None : CharKindId.Newline)
-                                : (builder.solver.MkAnd(GetAtom(i), builder.wordLetterPredicate).Equals(builder.solver.False) ? CharKindId.None : CharKindId.WordLetter);
+                    _asciiCharKind[i] =
+                        i == 10 ? (builder.solver.MkAnd(GetAtom(i), builder.newLinePredicate).Equals(builder.solver.False) ? 0 : CharKind.Newline)
+                                : (builder.solver.MkAnd(GetAtom(i), builder.wordLetterPredicate).Equals(builder.solver.False) ? 0 : CharKind.WordLetter);
         }
 
         private void InitializePrefixBoyerMoore()
@@ -434,58 +405,29 @@ namespace Microsoft.SRM
             // create initial states for A, A1 and Ar
             if (!A.info.ContainsSomeAnchor)
             {
-                // only the default previous character kind None(0) is ever going to be used for all initial states
-                _Aq0[(int)CharKindId.None] = State<S>.MkState(A, CharKindId.None, false);
-                _A1q0[(int)CharKindId.None] = State<S>.MkState(A1, CharKindId.None, false);
+                // only the default previous character kind 0 is ever going to be used for all initial states
+                _Aq0[0] = State<S>.MkState(A, 0);
+                _A1q0[0] = State<S>.MkState(A1, 0);
                 // _A1q0[0] is recognized as special initial state,
                 // this information is used for search optimization based on start set and prefix of A
-                _A1q0[(int)CharKindId.None].isInitialState = true;
-                // do not mark states of Ar as reverse because this info is irrelevant when no anchors are used
-                _Arq0[(int)CharKindId.None] = State<S>.MkState(Ar, CharKindId.None, false);
+                _A1q0[0].isInitialState = true;
+                _Arq0[0] = State<S>.MkState(Ar, 0);
             }
             else
             {
-                for (int i = 0; i < 6; i++)
+                for (uint i = 0; i < 5; i++)
                 {
-                    var kind = (CharKindId)i;
-                    if (kind == CharKindId.Start)
-                    {
-                        _Aq0[i] = State<S>.MkState(A, kind, false);
-                        _A1q0[i] = State<S>.MkState(A1, kind, false);
-                    }
-                    else
-                    {
-                        _Aq0[i] = State<S>.MkState(A.ReplaceStartAnchorByBottom(), kind, false);
-                        _A1q0[i] = State<S>.MkState(A1.ReplaceStartAnchorByBottom(), kind, false);
-                    }
-                    //don't create reverse-mode states unless some line-anchor is used somewhere
-                    //boundary anchors \b and \B are commutative and thus preserved in reverse
-                    _Arq0[i] = State<S>.MkState(Ar, kind, A.info.ContainsLineAnchor ? true : false);
+                    _Aq0[i] = State<S>.MkState(A, i);
+                    _A1q0[i] = State<S>.MkState(A1, i);
+                    _Arq0[i] = State<S>.MkState(Ar, i);
                     //used to detect if initial state was reentered, then startset can be triggered
                     //but observe that the behavior from the state may ultimately depend on the previous
                     //input char e.g. possibly causing nullability of \b or \B or of a start-of-line anchor,
-                    //in that sense there can be several "versions" (not more than 6) of the initial state
+                    //in that sense there can be several "versions" (not more than 5) of the initial state
                     _A1q0[i].isInitialState = true;
                 }
             }
         }
-
-//        private void InitializeVectors()
-//        {
-//#if UNSAFE
-//            if (A_StartSet_Size > 0 && A_StartSet_Size <= StartSetSizeLimit)
-//            {
-//                char[] startchars = new List<char>(builder.solver.GenerateAllCharacters(A_startset)).ToArray();
-//                A_StartSet_Vec = Array.ConvertAll(startchars, c => new Vector<ushort>(c));
-//                A_StartSet_singleton = (ushort)startchars[0];
-//            }
-//#endif
-
-//            if (this.A_prefix != string.Empty)
-//            {
-//                this.A_prefixUTF8_first_byte = new Vector<byte>(this.A_prefixUTF8[0]);
-//            }
-//        }
 
         /// <summary>
         /// Return the state after the given input string from the given state q.
@@ -581,45 +523,41 @@ namespace Microsoft.SRM
             throw new System.Text.RegularExpressions.RegexMatchTimeoutException(string.Empty, string.Empty, _matchTimeout);
         }
 
-        /// <summary>
-        /// Generate all matches.
-        /// <param name="isMatch">if true return null iff there exists a match</param>
-        /// <param name="input">input string</param>
-        /// <param name="startat">the position to start search in the input string</param>
-        /// <param name="endat">end position in the input, negative value means unspecified and taken to be input.Length-1</param>
-        /// </summary>
-        public Match FindMatch(bool isMatch, string input, int startat = 0, int endat = -1)
-        {
-            if (_checkTimeout)
-            {
-                // Using Environment.TickCount and not Stopwatch similar to the non-DFA case.
-                int timeout = (int)(_matchTimeout.TotalMilliseconds + 0.5);
-                _timeoutOccursAt = Environment.TickCount + timeout;
-            }
-
-            return FindMatchSafe(isMatch, input, startat, endat);
-        }
-
-        #region safe version of Matches and IsMatch for string input
-
+        #region match generation
         /// <summary>
         /// Find a match.
         /// <param name="quick">if true return null iff there exists a match</param>
         /// <param name="input">input string</param>
         /// <param name="startat">the position to start search in the input string</param>
-        /// <param name="endat">end position in the input, negative value means unspecified and taken to be input.Length-1</param>
+        /// <param name="k">the next position after the end position in the input</param>
         /// </summary>
-        internal Match FindMatchSafe(bool quick, string input, int startat = 0, int endat = -1)
+        public Match FindMatch(bool quick, string input, int startat, int k)
         {
-#if DEBUG
-            if (string.IsNullOrEmpty(input))
-                    throw new ArgumentException($"'{nameof(input)}' must be a nonempty string");
+            if (_checkTimeout)
+            {
+                // Using Environment.TickCount for efficiency instead of Stopwatch -- as in the non-DFA case.
+                int timeout = (int)(_matchTimeout.TotalMilliseconds + 0.5);
+                _timeoutOccursAt = Environment.TickCount + timeout;
+            }
 
-            if (startat >= input.Length || startat < 0)
-                    throw new ArgumentOutOfRangeException(nameof(startat));
-#endif
-
-            int k = ((endat < 0 | endat >= input.Length) ? input.Length : endat + 1);
+            if (startat == k)
+            {
+                //covers the special case when the remaining input suffix
+                //where a match is sought is empty (for example when the input is empty)
+                //in this case the only possible match is an empty match
+                uint prevKind = GetCharKind(input, startat - 1);
+                uint nextKind = GetCharKind(input, startat);
+                bool emptyMatchExists = A.IsNullableFor(CharKind.Context(prevKind, nextKind));
+                if (emptyMatchExists)
+        {
+                    if (quick)
+                        return null;
+                    else
+                        return new Match(startat, 0);
+                }
+                else
+                    return Match.NoMatch;
+            }
 
             //find the first accepting state
             //initial start position in the input is i = 0
@@ -627,16 +565,16 @@ namespace Microsoft.SRM
 
             int i_q0_A1;
             int watchdog;
+            //may return -1 as a legitimate value when the initial state is nullable and startat=0
+            //returns -2 when there is no match
             i = FindFinalStatePosition(input, k, i, out i_q0_A1, out watchdog);
 
-            if (i == k)
-            {
-                //end of input has been reached without reaching a final state, so no match exists
+            if (i == -2)
                 return Match.NoMatch;
-            }
             else
             {
                 if (quick)
+                    //this means success -- the original call was IsMatch
                     return null;
 
                 int i_start;
@@ -649,6 +587,16 @@ namespace Microsoft.SRM
                 }
                 else
                 {
+                    if (i < startat)
+                    {
+#if DEBUG
+                        if (i != startat - 1)
+                            throw new AutomataException(AutomataExceptionKind.InternalError);
+#endif
+                        i_start = startat;
+                    }
+                    else
+                        //walk in reverse to locate the start position of the match
                     i_start = FindStartPosition(input, i, i_q0_A1);
                     i_end = FindEndPosition(input, k, i_start);
                 }
@@ -688,18 +636,24 @@ namespace Microsoft.SRM
         private int FindEndPosition(string input, int k, int i)
         {
             int i_end = k;
-            CharKindId prevCharKindId = GetCharKindId(input, i - 1);
+            uint prevCharKind = GetCharKind(input, i - 1);
             // pick the correct start state based on previous character kind
-            State<S> q = _Aq0[(int)prevCharKindId];
+            State<S> q = _Aq0[prevCharKind];
+            if (q.IsNullable(GetCharKind(input, i)))
+            {
+                //empty match exists because the initial state is accepting
+                i_end = i - 1;
+                // stop here if q is lazy
+                if (q.Node.info.IsLazy)
+                    return i_end;
+            }
             while (i < k)
             {
-                //TBD: prefix optimization for A, i.e., to skip ahead
-                //over the initial prefix once it has been computed
                 q = Delta(input, i, q);
 
                 if (q.IsNullable(GetCharKind(input, i+1)))
                 {
-                    // stop here if q is not eager
+                    // stop here if q is lazy
                     if (q.Node.info.IsLazy)
                         return i;
                     //accepting state has been reached
@@ -734,8 +688,8 @@ namespace Microsoft.SRM
             // fetch the correct start state for Ar
             // this depends on previous character ---
             // which, because going backwards, is character number i+1
-            CharKindId prevKind = GetCharKindId(input, i + 1);
-            State<S> q = _Arq0[(int)prevKind];
+            uint prevKind = GetCharKind(input, i + 1);
+            State<S> q = _Arq0[prevKind];
             //Ar may have a fixed prefix sequence
             if (Ar_prefix.Length > 0)
             {
@@ -789,19 +743,19 @@ namespace Microsoft.SRM
         }
 
         /// <summary>
-        /// FindFinalStatePosition is optimized for the case when A starts with a fixed prefix
+        /// Returns -2 if no match exists. Returns -1 when i=0 and the initial state is nullable.
         /// </summary>
         /// <param name="input">given input string</param>
+        /// <param name="k">input length or bounded input length</param>
         /// <param name="i">start position</param>
         /// <param name="i_q0">last position the initial state of A1 was visited</param>
-        /// <param name="k">input length or bounded input length</param>
         /// <param name="watchdog">length of match when positive</param>
         private int FindFinalStatePosition(string input, int k, int i, out int i_q0, out int watchdog)
         {
             // get the correct start state of A1,
             // which in general depends on the previous character kind in the input
-            CharKindId prevCharKindId = GetCharKindId(input, i - 1);
-            State<S> q = _A1q0[(int)prevCharKindId];
+            uint prevCharKindId = GetCharKind(input, i - 1);
+            State<S> q = _A1q0[prevCharKindId];
 
             if (q.IsNothing)
             {
@@ -809,12 +763,20 @@ namespace Microsoft.SRM
                 //this happens for example when the original regex started with start anchor and prevCharKindId is not Start
                 i_q0 = i;
                 watchdog = -1;
-                return k;
+                return -2;
+            }
+
+            if (q.IsNullable(GetCharKind(input, i)))
+            {
+                //the initial state is nullable in this context so at least an empty match exists
+                i_q0 = i;
+                watchdog = -1;
+                //the last position of the match is i-1 because the match is empty
+                //this value is -1 if i=0
+                return i - 1;
             }
 
             int i_q0_A1 = i;
-            // use Ordinal/OrdinalIgnoreCase to avoid culture dependent semantics of IndexOf
-            StringComparison comparison = (this.A_fixedPrefix_ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
             watchdog = -1;
 
             // search for a match end position within input[i..k-1]
@@ -827,9 +789,6 @@ namespace Microsoft.SRM
 
                     if (this.A_prefixBM != null)
                     {
-                        // ++++ the prefix optimization can be omitted without affecting correctness ++++
-                        // but this optimization has a major perfomance boost when a fixed prefix exists
-                        // .... in some cases in the order of 10x
                         #region prefix optimization
                         //stay in the initial state if the prefix does not match
                         //thus advance the current position to the
@@ -839,10 +798,10 @@ namespace Microsoft.SRM
 
                         if (i == -1)
                         {
-                            // when a matching position does not exist then IndexOf returns -1
+                            // when a matching position does not exist then Scan returns -1
                             i_q0 = i_q0_A1;
                             watchdog = -1;
-                            return k;
+                            return -2;
                         }
                         else
                         {
@@ -852,7 +811,7 @@ namespace Microsoft.SRM
                             //for (int j = 0; j < prefix.Length; j++)
                             //    q = Delta(prefix[j], q, out regex);
                             // ---
-                            q = GetA1_skipState(q.PrevCharKindId);
+                            q = GetA1_skipState(q.PrevCharKind);
 
                             // skip the prefix
                             i = i + this.A_prefix.Length;
@@ -861,14 +820,14 @@ namespace Microsoft.SRM
                             {
                                 i_q0 = i_q0_A1;
                                 watchdog = GetWatchdog(q.Node);
-                                // return the last position of the match
+                                //return the last position of the match
                                 return i - 1;
                             }
                             if (i == k)
                             {
                                 // no match was found
                                 i_q0 = i_q0_A1;
-                                return k;
+                                return -2;
                             }
                         }
                         #endregion
@@ -883,18 +842,18 @@ namespace Microsoft.SRM
                         {
                             // no match was found
                             i_q0 = i_q0_A1;
-                            return k;
+                            return -2;
                         }
 
                         i_q0_A1 = i;
                         // the start state must be updated
                         // to reflect the kind of the previous character
                         // when anchors are not used, q will remain the same state
-                        q = _A1q0[(int)GetCharKindId(input, i - 1)];
+                        q = _A1q0[GetCharKind(input, i - 1)];
                         if (q.IsNothing)
                         {
                             i_q0 = i_q0_A1;
-                            return k;
+                            return -2;
                         }
                     }
                 }
@@ -912,7 +871,7 @@ namespace Microsoft.SRM
                 {
                     //q is a deadend state so any further search is meaningless
                     i_q0 = i_q0_A1;
-                    return k;
+                    return -2;
                 }
                 // continue from the next character
                 i += 1;
@@ -921,47 +880,46 @@ namespace Microsoft.SRM
                     DoCheckTimeout();
             }
 
+            //no match was found
             i_q0 = i_q0_A1;
-            return k;
+            return -2;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private uint GetCharKind(string input, int i) => CharKind.From(GetCharKindId(input, i));
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private CharKindId GetCharKindId(string input, int i)
+        private uint GetCharKind(string input, int i)
         {
             if (A.info.ContainsSomeAnchor)
             {
-                if (i == -1)
-                    return CharKindId.Start;
-
-                if (i == input.Length)
-                    return CharKindId.End;
+                if (i == -1 || i == input.Length)
+                    return CharKind.StartStop;
 
                 char nextChar = input[i];
                 if (nextChar == '\n')
                 {
                     if (builder.newLinePredicate.Equals(builder.solver.False))
+                        //ignore \n
                         return 0;
                     else
                     {
-                        if (i == input.Length - 1)
-                            return CharKindId.NewLineZ;
+                        if (i == 0 || i == input.Length - 1)
+                            //very first of very last \n
+                            //detection of very first \n is needed for rev(\Z)
+                            return CharKind.NewLineS;
                         else
-                            return CharKindId.Newline;
+                            return CharKind.Newline;
                     }
                 }
 
                 if (nextChar < 128)
-                    return _asciiCharKindId[nextChar];
+                    return _asciiCharKind[nextChar];
                 else
-                    return builder.solver.MkAnd(GetAtom(nextChar), builder.wordLetterPredicate).Equals(builder.solver.False) ? CharKindId.None : CharKindId.WordLetter;
+                    //apply the wordletter predicate to compute the kind of the next character
+                    return builder.solver.MkAnd(GetAtom(nextChar), builder.wordLetterPredicate).Equals(builder.solver.False) ? 0 : CharKind.WordLetter;
             }
             else
             {
                 // the previous character kind is irrelevant when anchors are not used
-                return CharKindId.None;
+                return 0;
             }
         }
 

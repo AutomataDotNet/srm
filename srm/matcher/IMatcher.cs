@@ -22,14 +22,14 @@ namespace Microsoft.SRM
         /// </summary>
         /// <param name="isMatch">if true then return null iff a match exists</param>
         /// <param name="input">given iput string</param>
-        /// <param name="startat">start position in the input, default is 0</param>
-        /// <param name="endat">end position in the input, -1 means that the value is unspecified and taken to be input.Length-1</param>
-        Match FindMatch(bool isMatch, string input, int startat = 0, int endat = -1);
+        /// <param name="startat">start position in the input</param>
+        /// <param name="endat">end position in the input</param>
+        public Match FindMatch(bool isMatch, string input, int startat, int endat);
 
         /// <summary>
         /// Custom serialization of the matcher as text in visible ASCII range.
         /// </summary>
-        void Serialize(StringBuilder sb);
+        public void Serialize(StringBuilder sb);
 
         /// <summary>
         /// Unwind the regex of the matcher and save the resulting state graph in DGML
@@ -41,6 +41,6 @@ namespace Microsoft.SRM
         /// <param name="onlyDFAinfo">if true then compute and save only genral DFA info</param>
         /// <param name="writer">dgml output is written here</param>
         /// <param name="maxLabelLength">maximum length of labels in nodes anything over that length is indicated with .. </param>
-        void SaveDGML(TextWriter writer, int bound, bool hideStateInfo, bool addDotStar, bool inReverse, bool onlyDFAinfo, int maxLabelLength);
+        public void SaveDGML(TextWriter writer, int bound, bool hideStateInfo, bool addDotStar, bool inReverse, bool onlyDFAinfo, int maxLabelLength);
     }
 }

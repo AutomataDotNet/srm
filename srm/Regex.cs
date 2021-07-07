@@ -98,7 +98,7 @@ namespace Microsoft.SRM
         /// </summary>
         private Regex(IMatcher matcher) => _matcher = matcher;
 
-        internal Match? Run(bool quick, int prevlen, string input, int beg, int length, int startat)
+        internal Match Run(bool quick, int prevlen, string input, int beg, int length, int startat)
         {
             if ((uint)startat > (uint)input.Length)
             {
@@ -109,12 +109,19 @@ namespace Microsoft.SRM
                 throw new ArgumentOutOfRangeException("length");
             }
 
-            int endat = Math.Min(beg + length, input.Length) - 1;
+            int k = beg + length;
 
-            if (startat > endat)
-                return Match.NoMatch;
+            // If the previous match was empty, advance by one before matching
+            // or terminate the matching if there is no remaining input to search in
+            if (prevlen == 0)
+            {
+                if (startat == k)
+                    return Match.NoMatch;
 
-            var match = _matcher.FindMatch(quick, input, startat, endat);
+                startat += 1;
+            }
+
+            var match = _matcher.FindMatch(quick, input, startat, k);
             if (quick)
             {
                 if (match is null)
@@ -136,8 +143,13 @@ namespace Microsoft.SRM
         /// <param name="startat">start position in the input</param>
         /// <param name="endat">end position in the input, -1 means that the value is unspecified and taken to be input.Length-1</param>
         /// </summary>
-        public bool IsMatch(string input, int startat = 0, int endat = -1)
-            => _matcher.FindMatch(true, input, startat, endat) is null;
+        public bool IsMatch(string input, int startat = 0, int endat = -1) {
+            int k = endat + 1;
+            if (k == 0) {
+                k = input.Length;
+            }
+            return _matcher.FindMatch(true, input, startat, k) is null;
+        }
 
         /// <summary>
         /// Returns all matches as pairs (startindex, length) in the input string.
@@ -147,14 +159,18 @@ namespace Microsoft.SRM
         /// <param name="startat">start position in the input, default is 0</param>
         /// <param name="endat">end position in the input, -1 means that the value is unspecified and taken to be input.Length-1</param>
         public List<Match> Matches(string input, int limit = 0, int startat = 0, int endat = -1) {
+            int k = endat + 1;
+            if (k == 0) {
+                k = input.Length;
+            }
             List<Match> results = new List<Match>();
-            Match result = _matcher.FindMatch(false, input, startat, endat);
+            Match result = _matcher.FindMatch(false, input, startat, k);
             while (result.Success) {
                 results.Add(result);
                 int newStart = result.Index + Math.Max(1, result.Length);
                 if (newStart >= input.Length)
                     break;
-                result = _matcher.FindMatch(false, input, newStart, endat);
+                result = _matcher.FindMatch(false, input, newStart, k);
             }
             return results;
         }
