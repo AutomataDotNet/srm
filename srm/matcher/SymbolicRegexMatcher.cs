@@ -379,7 +379,7 @@ namespace Microsoft.SRM
 
         private void InitializePrefixBoyerMoore()
         {
-            if (this.A_prefix != string.Empty && this.A_prefix.Length <= System.Text.RegularExpressions.RegexBoyerMoore.MaxLimit)
+            if (this.A_prefix != string.Empty && this.A_prefix.Length <= System.Text.RegularExpressions.RegexBoyerMoore.MaxLimit && this.A_prefix.Length > 1)
             {
                 string prefix = this.A_prefix;
                 // RegexBoyerMoore expects the prefix to be lower case when case is ignored
