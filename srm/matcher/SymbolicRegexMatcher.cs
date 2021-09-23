@@ -531,7 +531,7 @@ namespace Microsoft.SRM
         /// <param name="startat">the position to start search in the input string</param>
         /// <param name="k">the next position after the end position in the input</param>
         /// </summary>
-        public Match FindMatch(bool quick, string input, int startat, int k)
+        public Match? FindMatch(bool quick, string input, int startat, int k)
         {
             if (_checkTimeout)
             {

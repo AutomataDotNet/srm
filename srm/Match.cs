@@ -3,7 +3,7 @@
 
 namespace Microsoft.SRM
 {
-    public class Match
+    public struct Match
     {
         internal static Match NoMatch = new Match(-1, -1);
         public int Index { get; private set; }

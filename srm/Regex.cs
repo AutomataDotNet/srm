@@ -98,45 +98,6 @@ namespace Microsoft.SRM
         /// </summary>
         private Regex(IMatcher matcher) => _matcher = matcher;
 
-        internal Match Run(bool quick, int prevlen, string input, int beg, int length, int startat)
-        {
-            if ((uint)startat > (uint)input.Length)
-            {
-                throw new ArgumentOutOfRangeException("startat");
-            }
-            if ((uint)length > (uint)input.Length)
-            {
-                throw new ArgumentOutOfRangeException("length");
-            }
-
-            int k = beg + length;
-
-            // If the previous match was empty, advance by one before matching
-            // or terminate the matching if there is no remaining input to search in
-            if (prevlen == 0)
-            {
-                if (startat == k)
-                    return Match.NoMatch;
-
-                startat += 1;
-            }
-
-            var match = _matcher.FindMatch(quick, input, startat, k);
-            if (quick)
-            {
-                if (match is null)
-                    return null;
-                else
-                    return Match.NoMatch;
-            }
-            else if (match.Success)
-            {
-                return match;
-            }
-            else
-                return Match.NoMatch;
-        }
-
         /// <summary>
         /// Returns true iff the input string matches. 
         /// <param name="input">given iput string</param>
@@ -164,13 +125,13 @@ namespace Microsoft.SRM
                 k = input.Length;
             }
             List<Match> results = new List<Match>();
-            Match result = _matcher.FindMatch(false, input, startat, k);
+            Match result = _matcher.FindMatch(false, input, startat, k).Value;
             while (result.Success) {
                 results.Add(result);
                 int newStart = result.Index + Math.Max(1, result.Length);
                 if (newStart >= input.Length)
                     break;
-                result = _matcher.FindMatch(false, input, newStart, k);
+                result = _matcher.FindMatch(false, input, newStart, k).Value;
             }
             return results;
         }
