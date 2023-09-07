@@ -556,6 +556,10 @@ namespace Microsoft.SRM
             this.set = set;
             this.iteCond = iteCond;
             this.alts = alts;
+            if (this.left != null)
+                this.left.GetHashCode();
+            if (this.right != null)
+                this.right.GetHashCode();
         }
 
         internal SymbolicRegexNode<S> ConcatWithoutNormalizing(SymbolicRegexNode<S> next)
@@ -1708,10 +1712,17 @@ namespace Microsoft.SRM
                         }
                     case SymbolicRegexKind.Concat:
                         {
-                            if (this.left.kind == SymbolicRegexKind.Singleton)
-                                return this.right.GetPrefixSequence(pref.Add(this.left.set), lengthBound - 1);
-                            else
-                                return pref;
+                            var current = this;
+                            while (current.kind == SymbolicRegexKind.Concat && lengthBound > 0)
+                            {
+                                if (current.left.kind == SymbolicRegexKind.Singleton)
+                                    pref = pref.Add(current.left.set);
+                                else
+                                    return pref;
+                                lengthBound -= 1;
+                                current = current.right;
+                            }
+                            return current.GetPrefixSequence(pref, lengthBound);
                         }
                     case SymbolicRegexKind.Or:
                     case SymbolicRegexKind.And:
